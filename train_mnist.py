@@ -2,7 +2,8 @@ import setup_training
 from mpgan import augment, mask_manual
 import plotting
 
-from mnist import evaluation, MNISTGraphDataset
+#from mnist import evaluation, MNISTGraphDataset
+from mnist import MNISTGraphDataset
 
 import torch
 from torch import Tensor
@@ -651,14 +652,14 @@ def eval_save_plot(
     make_images(gen_output, f"{args.figs_path}/{epoch}.pdf")
 
     if "fid" in losses:
-        losses["fid"].append(
+        '''losses["fid"].append(
             evaluation.get_fid(
                 gen_output,
                 args.num_hits,
                 args.mnist_num,
                 batch_size=args.fpnd_batch_size,
             )
-        )
+        )'''
 
         if len(losses["fid"]) > 1:
             plotting.plot_fid(
