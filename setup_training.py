@@ -111,6 +111,10 @@ def parse_args():
         choices=["mpgan", "rgan", "pointnet", "pcgan"],
     )
 
+    add_bool_arg(parser, "use-mask", "Mask 0 energies or not", default=True)
+    add_bool_arg(parser, "normalize", "Normalize values or not", default=True)
+
+    # Chenged load-model so that without the flag the model will not be loaded
     add_bool_arg(parser, "load-model", "load a pretrained model", default=True)
     add_bool_arg(
         parser,
@@ -167,6 +171,9 @@ def parse_args():
     )
 
     add_bool_arg(parser, "real-only", "use jets with ony real particles", default=False)
+
+    add_bool_arg(parser, "make-plots", "make plots", default=True)
+    add_bool_arg(parser, "shower-ims", "make shower ims", default=False)
 
     add_bool_arg(parser, "multi-gpu", "use multiple gpus if possible", default=False)
 
@@ -280,8 +287,7 @@ def parse_regularization_args(parser):
 
 def parse_evaluation_args(parser):
     add_bool_arg(parser, "fpnd", "calc fpnd", default=False)
-    add_bool_arg(parser, "fpd", "calc fpd", default=True)
-    add_bool_arg(parser, "kpd", "calc kpd", default=True)
+    add_bool_arg(parser, "fpd", "calc fpd (coming soon)", default=False)
     add_bool_arg(parser, "efp", "calc w1efp", default=False)
     # parser.add_argument("--fid-eval-size", type=int, default=8192, help="number of samples generated for evaluating fid")
     parser.add_argument(
@@ -306,7 +312,7 @@ def parse_evaluation_args(parser):
     parser.add_argument(
         "--eval-tot-samples",
         type=int,
-        default=50000,
+        default=10000,
         help="tot # of jets to generate to sample from",
     )
 
@@ -421,6 +427,7 @@ def parse_mpgan_args(parser):
         help="cartesian, polarrel or polarrelabspt",
         choices=["cartesian, polarrel, polarrelabspt"],
     )
+    add_bool_arg(parser, "logE", "Use log of energy or not", default=True)
 
     parser.add_argument(
         "--norm", type=float, default=1, help="normalizing max value of features to this value"
@@ -428,7 +435,7 @@ def parse_mpgan_args(parser):
 
     parser.add_argument("--sd", type=float, default=0.2, help="standard deviation of noise")
 
-    parser.add_argument("--node-feat-size", type=int, default=3, help="node feature size")
+    parser.add_argument("--node-feat-size", type=int, default=4, help="node feature size")
     parser.add_argument(
         "--hidden-node-size",
         type=int,
@@ -607,15 +614,74 @@ def parse_gapt_args(parser):
         default=10,
         help="number of induced nodes in ISAB blocks, if using ISAB blocks",
     )
+    parser.add_argument(
+        "--num-ise-nodes",
+        type=int,
+        default=10,
+        help="number of induced nodes in ISE, if using ISE",
+    )
 
+    parser.add_argument(
+        "--global-noise-input-dim",
+        type=int,
+        default=8,
+        help="size of global noise vector z",
+    )
+
+    parser.add_argument(
+        "--global-noise-feat-dim",
+        type=int,
+        default=8,
+        help="size of processed global noise vector z'",
+    )
+
+    parser.add_argument(
+        "--global-noise-layers",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Global noise MLP intermediate layers",
+    )
+
+    parser.add_argument(
+        "--cond-feat-dim",
+        type=int,
+        default=8,
+        help="size of processed conditional vector z'",
+    )
+
+    parser.add_argument(
+        "--init-noise-dim",
+        type=int,
+        default=8,
+        help="size of initial noise for sampling the set",
+    )
+
+    parser.add_argument(
+        "--cond-net-layers",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Discriminator conditional net intermediate layers",
+    )
+    add_bool_arg(parser, "learnable-init-noise", "learn the gaussian noise parameters for sampling initial set", default=False)
+   
+    add_bool_arg(parser, "noise-conditioning", "condition generator on global noise", default=False)
+    add_bool_arg(parser, "n-conditioning", "condition generator on num. particles", default=False)
+    add_bool_arg(parser, "n-normalized", "use normalized num. particles", default=False)
+    add_bool_arg(parser, "no-D-conditioning", "do not condition discriminator on num. particles", default=False)
     add_bool_arg(parser, "gapt-mask", "use mask in GAPT", default=True)
     add_bool_arg(parser, "use-isab", "use ISAB in GAPT", default=False)
+    add_bool_arg(parser, "use-ise", "use ISE in GAPT discriminator", default=False)
+    add_bool_arg(parser, "block-residual", "residual connection at each SAB", default=False)
 
     add_bool_arg(parser, "layer-norm", "use layer normalization in G and D", default=False)
     add_bool_arg(parser, "layer-norm-disc", "use layer normalization in generator", default=False)
     add_bool_arg(
         parser, "layer-norm-gen", "use layer normalization in discriminator", default=False
     )
+    add_bool_arg(parser, "use-custom-mab", "use a custom (Stelzner's) implementation of MAB in GAPT", default=False)
+
 
 
 def parse_ext_models_args(parser):
@@ -1070,16 +1136,18 @@ def init_project_dirs(args):
 
     if args.dir_path == "":
         if args.n:
-            args.dir_path = f"/graphganvol/MPGAN/{dataset_str}outputs/"
+            args.dir_path = "/graphganvol/MPGAN/calogan_outputs/"
         elif args.lx:
-            args.dir_path = f"/eos/user/r/rkansal/MPGAN/{dataset_str}outputs/"
+            args.dir_path = "/eos/user/r/rkansal/MPGAN/calogan_outputs/"
         else:
-            args.dir_path = str(pathlib.Path(__file__).parent.resolve()) + f"/{dataset_str}outputs/"
+            args.dir_path = str(pathlib.Path(__file__).parent.resolve()) + "/calogan_outputs/"
 
     os.system(f"mkdir -p {args.dir_path}")
+    # os.makedirs(args.dir_path)
 
     args.efps_path = str(pathlib.Path(args.dir_path).parent.resolve()) + "/efps/"
     os.system(f"mkdir -p {args.efps_path}")
+    # os.makedirs(args.efps_path)
 
     return args
 
@@ -1100,6 +1168,7 @@ def init_model_dirs(args):
 
     dirs = ["models", "losses", "figs"]
 
+    # TODO check why these folder are not been made
     for dir in dirs:
         args_dict[dir + "_path"] = f"{args.dir_path}/{args.name}/{dir}/"
         os.system(f'mkdir -p {args_dict[dir + "_path"]}')
@@ -1303,6 +1372,7 @@ def setup_gapt(args, gen):
         "leaky_relu_alpha": args.leaky_relu_alpha,
         "dropout_p": args.gen_dropout if gen else args.disc_dropout,
         "batch_norm": args.batch_norm_gen if gen else args.batch_norm_disc,
+        "layer_norm": args.layer_norm_gen if gen else args.layer_norm_disc,
         "spectral_norm": args.spectral_norm_gen if gen else args.spectral_norm_disc,
     }
 
@@ -1311,9 +1381,27 @@ def setup_gapt(args, gen):
         "num_heads": args.num_heads,
         "embed_dim": args.gapt_embed_dim,
         "sab_fc_layers": args.sab_fc_layers,
+        "use_custom_mab": args.use_custom_mab,
         "use_mask": args.gapt_mask,
         "use_isab": args.use_isab,
         "num_isab_nodes": args.num_isab_nodes,
+        "block_residual": args.block_residual
+    }
+
+    global_noise_args = {
+        "global_noise_input_dim": args.global_noise_input_dim,
+        "global_noise_feat_dim": args.global_noise_feat_dim,
+        "global_noise_layers": args.global_noise_layers,
+        "noise_conditioning": args.noise_conditioning,
+        "n_conditioning": args.n_conditioning,
+        "n_normalized": args.n_normalized
+    }
+
+    cond_net_args = {
+        "cond_feat_dim": args.cond_feat_dim,
+        "cond_net_layers": args.cond_net_layers,
+        "n_conditioning": args.n_conditioning and not args.no_D_conditioning,
+        "n_normalized": args.n_normalized
     }
 
     # generator-specific args
@@ -1323,6 +1411,9 @@ def setup_gapt(args, gen):
         "final_fc_layers": args.final_fc_layers_gen,
         "dropout_p": args.gen_dropout,
         "layer_norm": args.layer_norm_gen,
+        "spectral_norm": args.spectral_norm_gen,
+        "learnable_init_noise": args.learnable_init_noise,
+        "init_noise_dim": args.init_noise_dim
     }
 
     # discriminator-specific args
@@ -1332,29 +1423,29 @@ def setup_gapt(args, gen):
         "final_fc_layers": args.final_fc_layers_disc,
         "dropout_p": args.disc_dropout,
         "layer_norm": args.layer_norm_disc,
+        "spectral_norm": args.spectral_norm_disc,
+        "use_ise": args.use_ise,
+        "num_ise_nodes": args.num_ise_nodes
     }
 
     if gen:
         return GAPT_G(
             **gen_args,
             **common_args,
+            **global_noise_args,
             linear_args=linear_args,
         )
     else:
         return GAPT_D(
             **disc_args,
             **common_args,
+            **cond_net_args,
             linear_args=linear_args,
         )
 
-
-# https://discuss.pytorch.org/t/how-do-i-check-the-number-of-parameters-of-a-model/4325/9
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
 def models(args, gen_only=False):
     """Set up generator and discriminator models, either new or loaded from a state dict"""
+    # TODO try to check the model here
     if args.model == "mpgan":
         G = setup_mpgan(args, gen=True)
         logging.info(G)
@@ -1383,8 +1474,6 @@ def models(args, gen_only=False):
 
         G = Graph_GAN(gen=True, args=deepcopy(args))
 
-    logging.info(f"# of parameters in G: {count_parameters(G)}")
-
     if gen_only:
         return G
 
@@ -1410,8 +1499,6 @@ def models(args, gen_only=False):
         from mpgan import Graph_GAN
 
         G = Graph_GAN(gen=False, args=deepcopy(args))
-    
-    logging.info(f"# of parameters in D: {count_parameters(D)}")
 
     if args.load_model:
         try:
@@ -1491,7 +1578,11 @@ def get_model_args(args):
             else args.hidden_node_size,
         }
     elif args.model == "gapt":
-        model_args = {"embed_dim": args.gapt_embed_dim}
+        if args.noise_conditioning:
+            model_args = {
+                "global_noise_dim": args.global_noise_input_dim
+            }
+        model_args["embed_dim"] = args.gapt_embed_dim
     elif args.model == "rgan" or args.model == "graphcnngan":
         model_args = {"latent_dim": args.latent_dim}
     elif args.model == "treegan":
@@ -1558,18 +1649,15 @@ def losses(args):
         keys.append("gp")
 
     # eval_keys = ["w1p", "w1m", "w1efp", "fpnd", "fpd", "coverage", "mmd"]
-    eval_keys = ["w1p", "w1m", "w1efp", "fpnd", "fpd", "kpd"]
+    eval_keys = ["w1p", "w1m", "w1efp", "fpnd", "fpd"]
     # metrics which store more than a single value per epoch e.g. mean and std
-    multi_value_keys = ["w1p", "w1m", "w1efp", "fpd", "kpd"]
+    multi_value_keys = ["w1p", "w1m", "w1efp"]
 
     if not args.fpnd:
         eval_keys.remove("fpnd")
 
     if not args.fpd:
         eval_keys.remove("fpd")
-
-    if not args.kpd:
-        eval_keys.remove("kpd")
 
     if not args.efp:
         eval_keys.remove("w1efp")
