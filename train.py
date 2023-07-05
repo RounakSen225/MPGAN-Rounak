@@ -347,7 +347,7 @@ def gen_multi_batch(
         print("labels.shape[0]", labels.shape[0])
         print("num_samples", num_samples)
         assert labels.shape[0] == num_samples, "number of labels doesn't match num_samples"
-        labels = Tensor(labels)
+        labels = Tensor(labels.float())
 
     gen_data = None
 
