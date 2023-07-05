@@ -68,7 +68,7 @@ z_boundaries = (torch.range(1, num_layers - 1) / num_layers) + shift
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.autograd.set_detect_anomalxy(False)
+    #torch.autograd.set_detect_anomalxy(False)
 
     args = setup_training.init()
     torch.manual_seed(args.seed)
