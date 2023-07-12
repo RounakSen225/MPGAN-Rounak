@@ -780,6 +780,49 @@ def make_plots(
     #     except:
     #         logging.info("Couldn't remove previous eval curves")
 
+def make_plots_calochallenge(
+    losses,
+    epoch,
+    real_jets,
+    gen_jets,
+    real_mask,
+    gen_mask,
+    name,
+    figs_path,
+    losses_path,
+    save_epochs=5,
+    loss="ls"
+):
+    """Plot histograms, jet images, loss curves, and evaluation curves"""
+
+    plotting.plot_hit_feats_calochallenge(
+        real_jets,
+        gen_jets,
+        real_mask,
+        gen_mask,
+        name=name + "h",
+        figs_path=figs_path,
+        show=False,
+    )
+
+    plotting.plot_layerwise_hit_feats_calochallenge(
+        real_jets,
+        gen_jets,
+        real_mask,
+        gen_mask,
+        name=name + "lh",
+        figs_path=figs_path,
+        show=False,
+    )
+
+    if len(losses["G"]) > 1:
+        plotting.plot_losses(losses, loss=loss, name=name, losses_path=losses_path, show=False)
+
+    try:
+        remove(losses_path + "/" + str(epoch - save_epochs) + ".pdf")
+    except:
+        logging.info("Couldn't remove previous loss curves")
+
 
 def eval_save_plot(
     args,
@@ -826,6 +869,7 @@ def eval_save_plot(
         zero_mask_particles=True,
         zero_neg_pt=True,
     )
+
     real_jets = real_jets.detach().cpu().numpy()
     if real_mask is not None:
         real_mask = real_mask.detach().cpu().numpy()
@@ -838,23 +882,18 @@ def eval_save_plot(
     save_losses(losses, args.losses_path)
 
     if args.make_plots:
-        make_plots(
+        make_plots_calochallenge(
             losses,
             epoch,
             real_jets,
             gen_jets,
             real_mask,
             gen_mask,
-            args.jets,
-            args.num_hits,
             str(epoch),
             args.figs_path,
             args.losses_path,
             save_epochs=args.save_epochs,
-            const_ylim=args.const_ylim,
-            coords=args.coords,
             loss=args.loss,
-            shower_ims=args.shower_ims,
         )
 
     #  Commented out because deprecated? TODO

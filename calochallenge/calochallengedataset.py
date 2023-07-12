@@ -66,8 +66,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         if self.logE:
             dataset[:, :, 3] = torch.log(dataset[:, :, 3] + energy_cutoff)
-    
-        print('Data shape: ', dataset.shape)
+
+        self.num_features = dataset.shape[2]
         feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
         print('Max features: ', feature_maxes)
         feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
@@ -98,6 +98,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         self.data = dataset[:tcut] if train else dataset[tcut:]
         self.jet_features = jet_features[:tcut] if train else jet_features[tcut:]
+    
+        print('Data shape: ', self.data.shape)
 
         logging.info("Dataset processed")
 
@@ -307,7 +309,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if not is_real_data and zero_neg_pt:
             dataset[:, :, 2][dataset[:, :, 2] < 0] = 0
 
-        return dataset[:, :, : self._num_non_mask_features], mask if ret_mask_separate else dataset
+        return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
 
     def __len__(self):
         return len(self.data)

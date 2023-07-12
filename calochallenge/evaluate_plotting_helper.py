@@ -4,6 +4,8 @@
 
     by C. Krause
 """
+# for creating a responsive plot
+
 
 import os
 
@@ -11,6 +13,8 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 from collections import Counter
+
+
 
 
 def plot_layer_comparison(hlf_class, data, reference_class, reference_data, arg, show=False):
@@ -770,20 +774,22 @@ def plot_xyz(data, data_inc, num_features=4, inc_num=1, num_thresholded=30, num_
     events = np.random.choice(i0[0], num_events)
     if num_thresholded != -1:
         data = np.array(list(map(lambda x: x[x[:, 3].argsort()][-num_thresholded:], data)), dtype = np.float32)
-    for i in events:
+    for i in sorted(events):
         data_new = data[i].reshape(-1, num_features)
+        data_new = data_new[data_new[:,3]>0]
         z = data_new[:,0]
         r = data_new[:,2]
         alpha = data_new[:,1]
         E = data_new[:,3]
         x, y = r*np.cos(alpha), r*np.sin(alpha)
-        fig = plt.figure(figsize=(10,10))
+        fig = plt.figure(figsize=(8,8))
         ax = plt.axes(projection ='3d')
         s = ax.scatter(x, z, y, c=E, cmap='jet')
         fig.colorbar(s, ax=ax, shrink=0.5)
         ax.set_xlabel('x')
         ax.set_ylabel('z')
         ax.set_zlabel('y')
+        ax.set_yticks(np.arange(13))
         #ax.set_zlim(-0.5,0.5)
         ax.set_title(r'Event {}, E_inc = {} MeV'.format((i+1),E0))
         plt.show()

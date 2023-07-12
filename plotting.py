@@ -90,6 +90,65 @@ def plot_hit_feats(
         plt.close()
         # gc.collect()
 
+def plot_hit_feats_calochallenge(
+    real_jets,
+    gen_jets,
+    real_mask=None,
+    gen_mask=None,
+    name=None,
+    figs_path=None,
+    show=False,
+    logE=True
+):
+    """Plot particle feature histograms"""
+    plabels = ["z", r"$\alpha$", "r", "E (GeV)"]
+    pbins = [
+        np.linspace(0, 12, 51),
+        np.linspace(-4, 4, 51),
+        np.linspace(0, 1500, 51),
+        np.linspace(0, 10000000, 51)
+    ]
+
+    # plabels = plabels_dict[coords]
+
+    if real_mask is not None:
+        parts_real = real_jets[real_mask]
+        parts_gen = gen_jets[gen_mask]      
+
+    else:
+        parts_real = real_jets.reshape(-1, real_jets.shape[2])
+        parts_gen = gen_jets.reshape(-1, gen_jets.shape[2])
+
+    fig = plt.figure(figsize=(16, 16))
+
+    for i in range(4):
+        fig.add_subplot(2, 2, i + 1)
+        plt.ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
+        real = parts_real[:,i]
+        gen = parts_gen[:,i]
+        if logE and i == 3:
+            real = np.log10(real[real > 0])
+            gen = np.log10(gen[gen > 0])
+            plabels[i] = "log10(E) (GeV)"
+            pbins[i] = np.linspace(-18, 7, 51)
+        plt.hist(real, bins = pbins[i], density=False, histtype='step', label='Real', color = 'red')
+        plt.hist(gen, bins = pbins[i], density=False, histtype='step', label='Generated', color = 'blue')
+        plt.xlabel(plabels[i])
+        plt.ylabel('Number of hits')
+        plt.legend(loc=1, prop={"size": 18})
+
+    # TODO pull from new updates
+    # test temporarily forbid saving plots
+    if figs_path is not None and name is not None:
+        plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
+
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+        # gc.collect()
+
 
 def plot_layerwise_hit_feats(
     real_showers,
@@ -181,6 +240,89 @@ def plot_layerwise_hit_feats(
 
     if figs_path is not None and name is not None:
         print(f"saving fig at {figs_path} {name}")
+        plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
+
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+def get_midpoint_arr(arr):
+    midpoint_arr = []
+    for i in range(len(arr)-1):
+        m = (arr[i] + arr[i+1])/2
+        midpoint_arr.append(m)
+    return midpoint_arr
+
+def find_layer(x, i, arr):
+    n = len(arr)
+    midpoint = get_midpoint_arr(arr)
+    if i == 0:
+        return x[x[:,0]<midpoint[0]]
+    elif i == n-1:
+        return x[x[:,0]>= midpoint[n-2]]
+    else:
+        return x[(x[:,0]>=midpoint[i-1])&(x[:,0]<midpoint[i])]
+
+
+def plot_layerwise_hit_feats_calochallenge(
+    real_jets,
+    gen_jets,
+    real_mask=None,
+    gen_mask=None,
+    name=None,
+    figs_path=None,
+    show=False,
+    logE=True
+):
+    """Plot particle feature histograms"""
+    plabels = ["z", r"$\alpha$", "r", "E (GeV)"]
+    pbins = [
+        np.linspace(0, 12, 51),
+        np.linspace(-4, 4, 51),
+        np.linspace(0, 1500, 51),
+        np.linspace(0, 10000000, 51)
+    ]
+
+    # plabels = plabels_dict[coords]
+    num_features = real_jets.shape[2]
+
+    if real_mask is not None:
+        parts_real = real_jets[real_mask]
+        parts_gen = gen_jets[gen_mask]      
+
+    else:
+        parts_real = real_jets.reshape(-1, num_features)
+        parts_gen = gen_jets.reshape(-1, num_features)
+
+    fig = plt.figure(figsize=(22, 22), constrained_layout=True)
+    fig.suptitle(" ")
+
+    layers = sorted(list(set(parts_real[:,0])))
+    subfigs = fig.subfigures(nrows=len(layers), ncols=1)
+
+    for i, subfig in enumerate(subfigs):
+        axs = subfig.subplots(nrows=1, ncols=3)
+        subfig.suptitle(f"Layer {round(layers[i])}")
+        for j in range(1, 4):
+            real = parts_real[parts_real[:,0] == layers[i]][:,j]
+            gen = find_layer(parts_gen, i, layers)[:,j]
+            if logE and j == 3:
+                real = np.log10(real[real > 0])
+                gen = np.log10(gen[gen > 0])
+                plabels[j] = "log10(E) (GeV)"
+                pbins[j] = np.linspace(-18, 7, 51)
+            axs[j-1].ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
+            axs[j-1].hist(real, bins = pbins[j], density=False, histtype='step', label='Real', color = 'red')
+            axs[j-1].hist(gen, bins = pbins[j], density=False, histtype='step', label='Generated', color = 'blue')
+            axs[j-1].set_xlabel(plabels[j])
+            axs[j-1].set_ylabel('Number of hits')
+            axs[j-1].legend()
+
+    # TODO pull from new updates
+    # test temporarily forbid saving plots
+    if figs_path is not None and name is not None:
         plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
 
 

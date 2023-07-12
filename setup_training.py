@@ -557,6 +557,7 @@ def parse_mpgan_args(parser):
 
 
 def parse_gapt_args(parser):
+    #parser.add_argument("--num-hits", type=int, default=30, help="number of hits")
     parser.add_argument(
         "--sab-layers-gen",
         type=int,
