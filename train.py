@@ -91,7 +91,7 @@ def main():
         use_mask=args.use_mask,
         normalize=args.normalize,
         train_fraction=args.ttsplit,
-        inc=80000
+        inc=[80000, 120500]
     )
 
     X_train_loaded = DataLoader(X_train, shuffle=True, batch_size=args.batch_size, pin_memory=True)
@@ -104,7 +104,7 @@ def main():
         use_mask=args.use_mask,
         normalize=args.normalize,
         train_fraction=args.ttsplit,
-        inc=80000
+        inc=[80000, 120500]
     )
     X_test_loaded = DataLoader(X_test, batch_size=args.batch_size, pin_memory=True)
     logging.info(f"Data loaded \n X_train \n {X_train} \n X_test \n {X_test}")

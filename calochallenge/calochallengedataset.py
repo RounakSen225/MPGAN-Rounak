@@ -25,7 +25,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         feature_shifts: List[float] = [-0.5, -0.5, -0.5, -0.5],
         particle: str = 'photon',
         num_features: int = 4,
-        inc: int = -1,
+        inc: List[int] = [],
         train_fraction: float = 0.7,
         logE: bool = True,
         use_mask: bool = False,
@@ -50,7 +50,6 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             self.photon_file = h5py.File(self.data_dir + 'dataset_1_photons_1.hdf5', 'r')
         else:
             self.photon_file = h5py.File(self.data_dir + 'dataset_1_photons_2.hdf5', 'r')
-
         self.HLF_1_photons.CalculateFeatures(self.photon_file["showers"][:])
 
         dataset = self.format_data()
@@ -76,79 +75,28 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if self.normalize:
             self.normalize_features(dataset, feature_shifts=-0.5)
             print('\nAfter normalization: \n')
-            print('Data shape: ', dataset.shape)
             feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
             print('Max features: ', feature_maxes)
             feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
             print('Min features: ', feature_mins)
 
-        if self.inc != -1:
+        if len(self.inc) != 0:
             data_inc = self.photon_file['incident_energies'][:]
             data_inc_sorted = np.sort(data_inc, axis=0).flatten()
-            E0 = data_inc_sorted[self.inc]
+            energies = data_inc_sorted[self.inc]
             data_inc = data_inc.flatten()
-            i0 = np.where(data_inc == E0)
-            dataset = dataset[i0]        
+            indices = [np.where(data_inc == element)[0] for element in energies]
+            dataset = torch.from_numpy(np.concatenate([dataset[idx] for idx in indices]))
 
         self.dataset = dataset
-
         jet_features = self.get_jet_features(dataset)
 
         tcut = int(len(dataset) * train_fraction)
-
         self.data = dataset[:tcut] if train else dataset[tcut:]
         self.jet_features = jet_features[:tcut] if train else jet_features[tcut:]
     
         print('Data shape: ', self.data.shape)
-
         logging.info("Dataset processed")
-
-    '''def energy_log_normalization(self, data):
-
-        data = torch.from_numpy(data)
-
-        print('\nData shape: ', data.shape)
-        feature_maxes = [float(torch.max(data[:, i])) for i in range(self.num_features)]
-        print('Max features: ', feature_maxes)
-        feature_mins = [float(torch.min(data[:, i])) for i in range(self.num_features)]
-        print('Min features: ', feature_mins)
-
-        feature_norms = 1.0
-        feature_shifts = -0.5
-        num_features = data.shape[1]
-
-        feature_mins = [float(min(torch.min(data[:, i]), 0)) for i in range(num_features)]
-       
-        if isinstance(feature_norms, float):
-            feature_norms = np.full(num_features, feature_norms)
-
-        if isinstance(feature_shifts, float):
-            feature_shifts = np.full(num_features, feature_shifts)
-
-        for i in range(num_features):
-            data[:, i] -= feature_mins[i]
-
-        feature_maxes = [float(torch.max(torch.abs(data[:, i]))) for i in range(num_features)]
-
-        logging.debug(f"{feature_maxes = }")
-
-        for i in range(num_features):
-            if feature_norms[i] is not None:
-                data[:, i] /= feature_maxes[i]
-                data[:, i] *= feature_norms[i]
-
-            if feature_shifts[i] is not None:
-                data[:, i] += feature_shifts[i]
-
-        print('After normalization: \n')
-
-        print('Data shape: ', data.shape)
-        feature_maxes = [float(torch.max(data[:, i])) for i in range(self.num_features)]
-        print('Max features: ', feature_maxes)
-        feature_mins = [float(torch.min(data[:, i])) for i in range(self.num_features)]
-        print('Min features: ', feature_mins)
-
-        return data'''
 
     def format_data(self):
         """
