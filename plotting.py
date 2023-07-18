@@ -111,10 +111,10 @@ def plot_hit_feats_calochallenge(
 
     # plabels = plabels_dict[coords]
 
+
     if real_mask is not None:
         parts_real = real_jets[real_mask]
-        parts_gen = gen_jets[gen_mask]      
-
+        parts_gen = gen_jets[gen_mask]
     else:
         parts_real = real_jets.reshape(-1, real_jets.shape[2])
         parts_gen = gen_jets.reshape(-1, gen_jets.shape[2])
@@ -255,7 +255,7 @@ def get_midpoint_arr(arr):
         midpoint_arr.append(m)
     return midpoint_arr
 
-def find_layer(x, i, arr):
+def get_gen_data_for_layer(x, i, arr):
     n = len(arr)
     midpoint = get_midpoint_arr(arr)
     if i == 0:
@@ -307,7 +307,7 @@ def plot_layerwise_hit_feats_calochallenge(
         subfig.suptitle(f"Layer {round(layers[i])}")
         for j in range(1, 4):
             real = parts_real[parts_real[:,0] == layers[i]][:,j]
-            gen = find_layer(parts_gen, i, layers)[:,j]
+            gen = get_gen_data_for_layer(parts_gen, i, layers)[:,j]
             if logE and j == 3:
                 real = np.log10(real[real > 0])
                 gen = np.log10(gen[gen > 0])
@@ -315,7 +315,8 @@ def plot_layerwise_hit_feats_calochallenge(
                 pbins[j] = np.linspace(-18, 7, 51)
             axs[j-1].ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
             axs[j-1].hist(real, bins = pbins[j], density=False, range=[np.min(real), np.max(real)], histtype='step', label='Real', color = 'red')
-            axs[j-1].hist(gen, bins = pbins[j], density=False, range=[np.min(gen), np.max(gen)], histtype='step', label='Generated', color = 'blue')
+            if len(gen) > 0:
+                axs[j-1].hist(gen, bins = pbins[j], density=False, range=[np.min(gen), np.max(gen)], histtype='step', label='Generated', color = 'blue')
             axs[j-1].set_xlabel(plabels[j])
             axs[j-1].set_ylabel('Number of hits')
             axs[j-1].legend()

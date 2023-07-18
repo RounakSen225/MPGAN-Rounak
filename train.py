@@ -1089,7 +1089,7 @@ def train(
                 best_epoch,
                 **extra_args,
             )
-        elif (epoch) % args.save_model_epochs == 0:
+        if (epoch) % args.save_model_epochs == 0:
             save_models(
                 D, G, D_optimizer, G_optimizer, args.models_path, epoch, multi_gpu=args.multi_gpu
             )
