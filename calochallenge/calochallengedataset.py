@@ -29,7 +29,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         train_fraction: float = 0.7,
         logE: bool = True,
         use_mask: bool = False,
-        train: bool = False
+        train: bool = False,
+        ignore_layer_12: bool = True
     ):
         self.data_dir = data_dir
         self.feature_norms = feature_norms
@@ -43,6 +44,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.logE = logE
         self.use_mask = use_mask
         self.inc = inc
+        self.ignore_layer_12 = ignore_layer_12
 
         #only considering photon data for now        
         self.HLF_1_photons = HLF('photon', filename= self.data_dir + 'binning_dataset_1_photons.xml')  
@@ -107,10 +109,13 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         data = self.photon_file['showers'][:]
         Ne = data.shape[0]
         coordinates = np.empty((0, self.num_features - 1))
+        layer_count = 0
         for layer in range(len(xml.GetTotalNumberOfRBins())):
             r_list, a_list = xml.fill_r_a_lists(layer)
-            stack = np.vstack(([layer]*len(r_list),a_list,r_list))
+            stack = np.vstack(([layer_count]*len(r_list),a_list,r_list))
             coordinates = np.vstack((coordinates, stack.T))
+            if len(r_list) > 0 or not self.ignore_layer_12:
+                layer_count += 1
         coordinates = np.tile(coordinates, (Ne, 1, 1))
         data_tile = np.tile(data.T, (1, 1, 1))
         point_cloud = np.vstack((coordinates.T, data_tile)).T
