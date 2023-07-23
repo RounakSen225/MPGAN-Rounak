@@ -20,6 +20,16 @@ plabels_dict = {
 
 LAYER_SPECS = [(3, 96), (12, 12), (12, 6)]
 
+#Change this if incident energies are different than 65.5 GeV
+plabels = ["z", r"$\alpha$", "r", "E (GeV)"]
+pbins = [
+    np.linspace(0, 5, 51),
+    np.linspace(-4, 4, 51),
+    np.linspace(0, 500, 51),
+    np.linspace(0, 10000000, 51)
+]
+
+
 # from guppy import hpy
 
 # h = hpy()
@@ -98,16 +108,10 @@ def plot_hit_feats_calochallenge(
     name=None,
     figs_path=None,
     show=False,
-    logE=True
+    logE=True,
+    logR=True
 ):
     """Plot particle feature histograms"""
-    plabels = ["z", r"$\alpha$", "r", "E (GeV)"]
-    pbins = [
-        np.linspace(0, 15, 51),
-        np.linspace(-4, 4, 51),
-        np.linspace(0, 2500, 51),
-        np.linspace(0, 10000000, 51)
-    ]
 
     # plabels = plabels_dict[coords]
 
@@ -130,9 +134,14 @@ def plot_hit_feats_calochallenge(
             real = np.log10(real[real > 0])
             gen = np.log10(gen[gen > 0])
             plabels[i] = "log10(E) (GeV)"
-            pbins[i] = np.linspace(-18, 7, 51)
-        plt.hist(real, bins = pbins[i], density=False, range=[np.min(real), np.max(real)], histtype='step', label='Real', color = 'red')
-        plt.hist(gen, bins = pbins[i], density=False, range=[np.min(gen), np.max(gen)], histtype='step', label='Generated', color = 'blue')
+            pbins[i] = np.linspace(-2, 10, 51)
+        if logR and i == 2:
+            real = np.log10(real[real > 0])
+            gen = np.log10(gen[gen > 0])
+            plabels[i] = "log10(r)"
+            pbins[i] = np.linspace(-1, 5, 51)
+        plt.hist(real, bins = pbins[i], density=False, histtype='step', label='Real', color = 'red')
+        plt.hist(gen, bins = pbins[i], density=False, histtype='step', label='Generated', color = 'blue')
         plt.xlabel(plabels[i])
         plt.ylabel('Number of hits')
         plt.legend(loc=1, prop={"size": 18})
@@ -274,16 +283,10 @@ def plot_layerwise_hit_feats_calochallenge(
     name=None,
     figs_path=None,
     show=False,
-    logE=True
+    logE=True,
+    logR=True
 ):
     """Plot particle feature histograms"""
-    plabels = ["z", r"$\alpha$", "r", "E (GeV)"]
-    pbins = [
-        np.linspace(0, 15, 51),
-        np.linspace(-4, 4, 51),
-        np.linspace(0, 2500, 51),
-        np.linspace(0, 10000000, 51)
-    ]
 
     # plabels = plabels_dict[coords]
     num_features = real_jets.shape[2]
@@ -312,11 +315,16 @@ def plot_layerwise_hit_feats_calochallenge(
                 real = np.log10(real[real > 0])
                 gen = np.log10(gen[gen > 0])
                 plabels[j] = "log10(E) (GeV)"
-                pbins[j] = np.linspace(-18, 7, 51)
+                pbins[j] = np.linspace(-3, 15, 51)
+            if logR and i == 2:
+                real = np.log10(real[real > 0])
+                gen = np.log10(gen[gen > 0])
+                plabels[i] = "log10(r)"
+                pbins[i] = np.linspace(-1, 20, 51)
             axs[j-1].ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
-            axs[j-1].hist(real, bins = pbins[j], density=False, range=[np.min(real), np.max(real)], histtype='step', label='Real', color = 'red')
+            axs[j-1].hist(real, bins = pbins[j], density=False, histtype='step', label='Real', color = 'red')
             if len(gen) > 0:
-                axs[j-1].hist(gen, bins = pbins[j], density=False, range=[np.min(gen), np.max(gen)], histtype='step', label='Generated', color = 'blue')
+                axs[j-1].hist(gen, bins = pbins[j], density=False, histtype='step', label='Generated', color = 'blue')
             axs[j-1].set_xlabel(plabels[j])
             axs[j-1].set_ylabel('Number of hits')
             axs[j-1].legend()

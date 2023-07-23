@@ -113,6 +113,9 @@ def parse_args():
 
     add_bool_arg(parser, "use-mask", "Mask 0 energies or not", default=True)
     add_bool_arg(parser, "normalize", "Normalize values or not", default=True)
+    add_bool_arg(parser, "logR", "Normalize values or not", default=True)
+    add_bool_arg(parser, "ignore-layer-12", "Normalize values or not", default=False)
+
 
     # Chenged load-model so that without the flag the model will not be loaded
     add_bool_arg(parser, "load-model", "load a pretrained model", default=True)

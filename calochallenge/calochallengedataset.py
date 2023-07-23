@@ -28,6 +28,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         inc: List[int] = [],
         train_fraction: float = 0.7,
         logE: bool = True,
+        logR: bool = True,
         use_mask: bool = False,
         train: bool = False,
         ignore_layer_12: bool = True
@@ -42,6 +43,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.particle = particle
         self.num_features = num_features
         self.logE = logE
+        self.logR = logR
         self.use_mask = use_mask
         self.inc = inc
         self.ignore_layer_12 = ignore_layer_12
@@ -67,6 +69,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         if self.logE:
             dataset[:, :, 3] = torch.log(dataset[:, :, 3] + energy_cutoff)
+
+        if self.logR:
+            dataset[:, :, 2] = torch.log(dataset[:, :, 2])
 
         self.num_features = dataset.shape[2]
         feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
@@ -254,6 +259,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if self.logE:
             dataset[:, :, 3] = torch.exp(dataset[:, :, 3]) - energy_cutoff
 
+        if self.logR:
+            dataset[:, :, 2] = torch.exp(dataset[:, :, 2])
+
         mask = dataset[:, :, -1] >= 0.5 if self.use_mask else None
 
         if not is_real_data and zero_mask_particles and self.use_mask:
@@ -261,6 +269,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         if not is_real_data and zero_neg_pt:
             dataset[:, :, 2][dataset[:, :, 2] < 0] = 0
+            dataset[:, :, 0][dataset[:, :, 0] < 0] = 0
 
         return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
 

@@ -88,10 +88,12 @@ def main():
         data_dir=args.datasets_path,
         num_particles=args.num_hits,
         logE=args.logE,
+        logR=args.logR,
         use_mask=args.use_mask,
         normalize=args.normalize,
         train_fraction=args.ttsplit,
-        inc=[80000, 120500]
+        ignore_layer_12=args.ignore_layer_12,
+        inc=[80000]
     )
 
     X_train_loaded = DataLoader(X_train, shuffle=True, batch_size=args.batch_size, pin_memory=True)
@@ -101,10 +103,12 @@ def main():
         data_dir=args.datasets_path,
         num_particles=args.num_hits,
         logE=args.logE,
+        logR=args.logR,
         use_mask=args.use_mask,
         normalize=args.normalize,
         train_fraction=args.ttsplit,
-        inc=[80000, 120500]
+        ignore_layer_12=args.ignore_layer_12,
+        inc=[80000]
     )
     X_test_loaded = DataLoader(X_test, batch_size=args.batch_size, pin_memory=True)
     logging.info(f"Data loaded \n X_train \n {X_train} \n X_test \n {X_test}")
