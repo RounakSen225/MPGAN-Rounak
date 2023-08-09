@@ -19,8 +19,7 @@ from torch.utils.data import DataLoader
 from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
 from torch.distributions.normal import Normal
-
-from collections import Counter
+import math
 
 import numpy as np
 
@@ -37,30 +36,31 @@ import logging
 # h = hpy()
 
 # TODO switch eta phi
-LAYER_SPECS = [(3, 96), (12, 12), (12, 6)]
+LAYER_SPECS = [(1, 500), (10, 175), (10, 375), (1, 500), (1, 1500)]
 num_layers = len(LAYER_SPECS)
 shift = -0.5  # from normalisation
-eta_idx = 0
-phi_idx = 1
-z_idx = 2
-
+r_idx = 2
+alpha_idx = 1
+z_idx = 0
+offset = 0.0
+log_r = True
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
 
 
-eta_boundaries = [
-    (torch.range(1, LAYER_SPECS[i][1] - 1) / LAYER_SPECS[i][1]) + shift for i in range(3)
+r_boundaries = [
+    (torch.arange(0, LAYER_SPECS[i][1]-1) / LAYER_SPECS[i][1]) + shift for i in range(num_layers)
 ]
 
-phi_boundaries = [
-    (torch.range(1, LAYER_SPECS[i][0] - 1) / LAYER_SPECS[i][0]) + shift for i in range(3)
+alpha_boundaries = [
+    (torch.arange(0, LAYER_SPECS[i][0]-1) / LAYER_SPECS[i][0]) + shift for i in range(num_layers)
 ]
 
 # TODO don't know why should be num_layers - 1, this will have only 1 and 2, is it because mix of range and arange?
 # and why shift is -0.5
 # Raghav version
-z_boundaries = (torch.range(1, num_layers - 1) / num_layers) + shift
+z_boundaries = (torch.arange(0, num_layers-1) / num_layers) + shift
 
 # Tina version
 # z_boundaries = (torch.range(-1, num_layers -1) / num_layers) - shift
@@ -124,6 +124,8 @@ def main():
     logging.info("Optimizers loaded")
 
     losses, best_epoch = setup_training.losses(args)
+
+    log_r = args.logR
 
     train(
         args,
@@ -205,20 +207,21 @@ class BucketizeFunction(torch.autograd.Function):
 
             filter_layer = input[filter]
            
-            phi_bins = torch.bucketize(
-                filter_layer[:, phi_idx], phi_boundaries[i].to(input.device)
+            alpha_bins = torch.bucketize(
+                filter_layer[:, alpha_idx], alpha_boundaries[i].to(input.device)
             )
-            filter_layer[:, phi_idx] = ((phi_bins + 0.5) / LAYER_SPECS[i][0]) + shift
-          
+
+            filter_layer[:, alpha_idx] = ((alpha_bins + 0.5) / LAYER_SPECS[i][0]) + shift
+
 
           
-            eta_bins = torch.bucketize(
-                filter_layer[:, eta_idx], eta_boundaries[i].to(input.device)
+            r_bins = torch.bucketize(
+                filter_layer[:, r_idx], r_boundaries[i].to(input.device)
             )
-            
-            filter_layer[:, eta_idx] = ((eta_bins + 0.5) / LAYER_SPECS[i][1]) + shift
+
+            filter_layer[:, r_idx] = ((r_bins + 0.5) / LAYER_SPECS[i][1]) + shift
             input[filter] = filter_layer
-          
+        input = torch.round(input, decimals=4)  
         return input
 
     @staticmethod
@@ -300,10 +303,10 @@ def gen(
 
    
     global_noise = torch.randn(num_samples, model_args['global_noise_dim']).to(device) if G.noise_conditioning else None
-    gen_data = G(noise, labels, global_noise)
+    semi_gen_data  = G(noise, labels, global_noise)
 
-    '''ste = BucketizeSTE(device)
-    gen_data = ste(semi_gen_data)'''
+    ste = BucketizeSTE(device)
+    gen_data = ste(semi_gen_data)
     
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
@@ -795,7 +798,8 @@ def make_plots_calochallenge(
     figs_path,
     losses_path,
     save_epochs=5,
-    loss="ls"
+    loss="ls",
+    logR=True
 ):
     """Plot histograms, jet images, loss curves, and evaluation curves"""
 
@@ -807,6 +811,7 @@ def make_plots_calochallenge(
         name=name + "h",
         figs_path=figs_path,
         show=False,
+        logR=logR,
     )
 
     plotting.plot_layerwise_hit_feats_calochallenge(
@@ -817,6 +822,7 @@ def make_plots_calochallenge(
         name=name + "lh",
         figs_path=figs_path,
         show=False,
+        logR=logR,
     )
 
     if len(losses["G"]) > 1:
@@ -898,6 +904,7 @@ def eval_save_plot(
             args.losses_path,
             save_epochs=args.save_epochs,
             loss=args.loss,
+            logR=args.logR
         )
 
     #  Commented out because deprecated? TODO
