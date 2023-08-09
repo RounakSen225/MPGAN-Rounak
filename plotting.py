@@ -131,14 +131,14 @@ def plot_hit_feats_calochallenge(
         real = parts_real[:,i]
         gen = parts_gen[:,i]
         if logE and i == 3:
-            real = np.log10(real[real > 0])
-            gen = np.log10(gen[gen > 0])
-            plabels[i] = "log10(E) (GeV)"
+            real = np.log(real[real > 0])
+            gen = np.log(gen[gen > 0])
+            plabels[i] = "log(E) (GeV)"
             pbins[i] = np.linspace(-2, 10, 51)
         if logR and i == 2:
-            real = np.log10(real[real > 0])
-            gen = np.log10(gen[gen > 0])
-            plabels[i] = "log10(r)"
+            real = np.log(real[real > 0])
+            gen = np.log(gen[gen > 0])
+            plabels[i] = "log(r)"
             pbins[i] = np.linspace(-1, 5, 51)
         plt.hist(real, bins = pbins[i], density=False, histtype='step', label='Real', color = 'red')
         plt.hist(gen, bins = pbins[i], density=False, histtype='step', label='Generated', color = 'blue')
@@ -312,15 +312,15 @@ def plot_layerwise_hit_feats_calochallenge(
             real = parts_real[parts_real[:,0] == layers[i]][:,j]
             gen = get_gen_data_for_layer(parts_gen, i, layers)[:,j]
             if logE and j == 3:
-                real = np.log10(real[real > 0])
-                gen = np.log10(gen[gen > 0])
-                plabels[j] = "log10(E) (GeV)"
+                real = np.log(real[real > 0])
+                gen = np.log(gen[gen > 0])
+                plabels[j] = "log(E) (GeV)"
                 pbins[j] = np.linspace(-3, 15, 51)
-            if logR and i == 2:
-                real = np.log10(real[real > 0])
-                gen = np.log10(gen[gen > 0])
-                plabels[i] = "log10(r)"
-                pbins[i] = np.linspace(-1, 20, 51)
+            if logR and j == 2:
+                real = np.log(real[real > 0])
+                gen = np.log(gen[gen > 0])
+                plabels[j] = "log(r)"
+                pbins[j] = np.linspace(-1, 5, 51)
             axs[j-1].ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
             axs[j-1].hist(real, bins = pbins[j], density=False, histtype='step', label='Real', color = 'red')
             if len(gen) > 0:

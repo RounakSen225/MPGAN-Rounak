@@ -52,6 +52,9 @@ log_r = True
 r_boundaries = [
     (torch.arange(0, LAYER_SPECS[i][1]-1) / LAYER_SPECS[i][1]) + shift for i in range(num_layers)
 ]
+r_boundaries_log = [
+    (torch.log(torch.arange(1, LAYER_SPECS[i][1]-1)) / math.log(LAYER_SPECS[i][1])) + shift for i in range(num_layers)
+]
 
 alpha_boundaries = [
     (torch.arange(0, LAYER_SPECS[i][0]-1) / LAYER_SPECS[i][0]) + shift for i in range(num_layers)
@@ -125,6 +128,7 @@ def main():
 
     losses, best_epoch = setup_training.losses(args)
 
+    global log_r
     log_r = args.logR
 
     train(
@@ -214,12 +218,16 @@ class BucketizeFunction(torch.autograd.Function):
             filter_layer[:, alpha_idx] = ((alpha_bins + 0.5) / LAYER_SPECS[i][0]) + shift
 
 
-          
             r_bins = torch.bucketize(
-                filter_layer[:, r_idx], r_boundaries[i].to(input.device)
-            )
-
+                    filter_layer[:, r_idx], r_boundaries[i].to(input.device)
+                )
             filter_layer[:, r_idx] = ((r_bins + 0.5) / LAYER_SPECS[i][1]) + shift
+            if log_r:
+                r_bins = torch.bucketize(
+                    filter_layer[:, r_idx], r_boundaries_log[i].to(input.device)
+                )
+                filter_layer[:, r_idx] = ((r_bins + 0.5) / math.log(LAYER_SPECS[i][1])) + shift
+
             input[filter] = filter_layer
         input = torch.round(input, decimals=4)  
         return input
