@@ -6,7 +6,7 @@ from jetnet.datasets.normalisations import FeaturewiseLinearBounded, Featurewise
 
 from jetnet import evaluation'''
 
-
+from typing import List, Union
 import setup_training
 from mpgan import augment, mask_manual
 import plotting
@@ -36,37 +36,23 @@ import logging
 # h = hpy()
 
 # TODO switch eta phi
-LAYER_SPECS = [(1, 500), (10, 175), (10, 375), (1, 500), (1, 1500)]
-num_layers = len(LAYER_SPECS)
-shift = -0.5  # from normalisation
 r_idx = 2
 alpha_idx = 1
 z_idx = 0
-offset = 0.0
-log_r = True
+shift = -0.5
+offset = 0.5
+num_layers = 5
+min_layer = 0
+max_layer = 12
+normalize = True
+ignore_layer_12 = True
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
 
-
-r_boundaries = [
-    (torch.arange(0, LAYER_SPECS[i][1]-1) / LAYER_SPECS[i][1]) + shift for i in range(num_layers)
-]
-r_boundaries_log = [
-    (torch.log(torch.arange(1, LAYER_SPECS[i][1]-1)) / math.log(LAYER_SPECS[i][1])) + shift for i in range(num_layers)
-]
-
-alpha_boundaries = [
-    (torch.arange(0, LAYER_SPECS[i][0]-1) / LAYER_SPECS[i][0]) + shift for i in range(num_layers)
-]
-
-# TODO don't know why should be num_layers - 1, this will have only 1 and 2, is it because mix of range and arange?
-# and why shift is -0.5
-# Raghav version
-z_boundaries = (torch.arange(0, num_layers-1) / num_layers) + shift
-
-# Tina version
-# z_boundaries = (torch.range(-1, num_layers -1) / num_layers) - shift
+r_boundaries = []
+alpha_boundaries = []
+z_boundaries = []
 
 
 def main():
@@ -128,8 +114,15 @@ def main():
 
     losses, best_epoch = setup_training.losses(args)
 
-    global log_r
-    log_r = args.logR
+    global normalize
+    global ignore_layer_12
+    normalize = args.normalize
+    ignore_layer_12 = args.ignore_layer_12
+
+    global z_boundaries
+    global r_boundaries
+    global alpha_boundaries
+    z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
 
     train(
         args,
@@ -148,6 +141,21 @@ def main():
         extra_args,
     )
 
+def normalize_input(
+        data: Tensor,
+        idx: int,
+        layer: int = -1,
+        feature_norms: Union[float, List[float]] = 1.0,
+        feature_shifts: Union[float, List[float]] = 0.0,
+        ):
+        if not normalize: return data
+        boundaries = z_boundaries, alpha_boundaries, r_boundaries
+        if idx > 0: data_max = boundaries[idx][layer].size(dim=0)
+        else: data_max =  boundaries[idx].size(dim=0)
+        if data.nelement() != 0 and data_max != 0: return data / data_max * feature_norms + feature_shifts
+        return data
+        
+        
 
 def get_gen_noise(
     model_args,
@@ -197,38 +205,30 @@ def get_gen_noise(
 class BucketizeFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
-        # set values to bin centers, taking care of normalisatio
+        # set values to bin centers, taking care of normalisation
 
-      
         z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
-        input[:, :, z_idx] = ((z_bins + 0.5) / num_layers) + shift
+        input[:, :, z_idx] = normalize_input(data=z_bins, idx=z_idx, feature_shifts=shift)
         
         # lambda function to map eta and phi to different z
         for i in range(num_layers):
             # need to check whether z_b corresponds to current z values
             filter = z_bins == i
-           
 
             filter_layer = input[filter]
            
             alpha_bins = torch.bucketize(
                 filter_layer[:, alpha_idx], alpha_boundaries[i].to(input.device)
             )
-
-            filter_layer[:, alpha_idx] = ((alpha_bins + 0.5) / LAYER_SPECS[i][0]) + shift
-
+            filter_layer[:, alpha_idx] = normalize_input(data=alpha_bins, idx=alpha_idx, layer=i, feature_shifts=shift)
 
             r_bins = torch.bucketize(
                     filter_layer[:, r_idx], r_boundaries[i].to(input.device)
                 )
-            filter_layer[:, r_idx] = ((r_bins + 0.5) / LAYER_SPECS[i][1]) + shift
-            if log_r:
-                r_bins = torch.bucketize(
-                    filter_layer[:, r_idx], r_boundaries_log[i].to(input.device)
-                )
-                filter_layer[:, r_idx] = ((r_bins + 0.5) / math.log(LAYER_SPECS[i][1])) + shift
+            filter_layer[:, r_idx] = normalize_input(data=r_bins, idx=r_idx, layer=i, feature_shifts=shift)
 
             input[filter] = filter_layer
+
         input = torch.round(input, decimals=4)  
         return input
 

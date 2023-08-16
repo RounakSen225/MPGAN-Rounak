@@ -9,6 +9,7 @@ import h5py
 
 from calochallenge.xmlhandler import XMLHandler
 from calochallenge.highlevelfeatures import HighLevelFeatures as HLF
+import math
 # from os.path import exists
 
 energy_cutoff = 1e-18
@@ -200,6 +201,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         logging.debug(f"{feature_maxes = }")
 
         for i in range(num_features):
+            if feature_maxes[i] == 0: continue
             if feature_norms[i] is not None:
                 dataset[:, :, i] /= feature_maxes[i]
                 dataset[:, :, i] *= feature_norms[i]
@@ -272,6 +274,60 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             dataset[:, :, 0][dataset[:, :, 0] < 0] = 0
 
         return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
+    
+    def get_boundaries(self):
+        filename = self.data_dir + 'binning_dataset_1_' + self.particle + 's.xml'
+        xml = XMLHandler(self.particle, filename=filename)
+        l_list = []
+        r_list = []
+        alpha_list = []
+        layer_count = 0
+        for l in range(len(xml.GetTotalNumberOfRBins())):
+            r, alpha = xml.fill_r_a_lists(l)
+            r = list(set(r))
+            alpha = list(set(alpha))
+            if len(r) > 0:
+                l_list.append(layer_count)
+                if self.logR: r_list.append(torch.log(torch.Tensor(sorted(r))))
+                else: r_list.append(torch.Tensor(sorted(r)))
+                alpha_list.append(torch.Tensor(sorted(alpha)))
+            if len(r) > 0 or not self.ignore_layer_12: layer_count += 1
+        l_list = torch.Tensor(sorted(l_list))
+        l_list, alpha_list, r_list = self._normalize(l_list=l_list, alpha_list=alpha_list, r_list=r_list, feature_shifts=-0.5)
+        l_boundaries = []
+        alpha_boundaries = []
+        r_boundaries = []
+        l_boundaries = (l_list[:-1]+l_list[1:])/2
+        for alpha_layer in alpha_list:
+            alpha_boundaries.append((alpha_layer[:-1]+alpha_layer[1:])/2)
+        for r_layer in r_list:
+            r_boundaries.append((r_layer[:-1] + r_layer[1:])/2)
+        return l_boundaries, alpha_boundaries, r_boundaries
+    
+    def _normalize(self, 
+        l_list, 
+        alpha_list, 
+        r_list,
+        feature_norms = 1.0,
+        feature_shifts = 0.0,
+    ):
+        if not self.normalize: return l_list, alpha_list, r_list
+        l_norm, alpha_norm, r_norm = [], [], []
+        if l_list.nelement() != 0 and torch.max(l_list) != 0:
+            l_norm = torch.Tensor(l_list / torch.max(torch.abs(l_list)) * feature_norms + feature_shifts)
+        for i in range(len(r_list)):
+            if r_list[i].nelement() != 0 and torch.max(r_list[i]) != 0: 
+                r_norm.append(torch.Tensor(r_list[i] / torch.max(torch.abs(r_list[i])) * feature_norms + feature_shifts))
+        for i in range(len(alpha_list)):
+            if alpha_list[i].nelement() != 0:
+                alpha_shifted = alpha_list[i] - torch.min(alpha_list[i])
+                if torch.max(alpha_shifted) != 0:
+                    alpha_norm.append(torch.Tensor(alpha_shifted / torch.max(torch.abs(alpha_shifted)) * feature_norms + feature_shifts))
+                else:
+                    alpha_norm.append(alpha_shifted)
+            else:
+                alpha_norm.append(alpha_list[i])
+        return l_norm, alpha_norm, r_norm
 
     def __len__(self):
         return len(self.data)
