@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 class XMLHandler:
 
-    def __init__(self, particle_name, filename='binning.xml'):
+    def __init__(self, particle_name, filename='binning.xml', logR=False):
 
         tree = ET.parse(filename)
         root = tree.getroot()
@@ -29,6 +29,7 @@ class XMLHandler:
         self.phi_edges = []
         self.eta_bins = []
         self.phi_bins = []
+        self.logR = logR
 
         self.etaRegion = 0
 
@@ -65,7 +66,7 @@ class XMLHandler:
 
         bins_in_alpha = int(subelem.attrib.get('n_bin_alpha'))
         self.a_bins.append(bins_in_alpha)
-        self.r_midvalue.append(self.get_midpoint(r_list))
+        self.r_midvalue.append(self.get_midpoint(arr=r_list, logFlag=self.logR))
         if bins_in_alpha > 1:
             self.layerWithBinningInAlpha.append(int(layer))
 
@@ -82,10 +83,15 @@ class XMLHandler:
                 a_list.append(list_a_values[i0][j0])
         return r_list, a_list
 
-    def get_midpoint(self, arr):
+    def get_midpoint(self, arr, logFlag=False):
         middle_points = []
         for i in range(len(arr)-1):
-            middle_value = arr[i] + float((arr[i+1] - arr[i]))/2
+            if logFlag:
+                value1 = arr[i] if arr[i] > 0 else 1
+                value2 = arr[i+1] if arr[i+1] > 0 else 1
+                middle_value = math.log(value1) + float((math.log(value2) - math.log(value1)))/2
+            else:
+                middle_value = arr[i] + float((arr[i+1] - arr[i]))/2
             middle_points.append(middle_value)
         return middle_points
 

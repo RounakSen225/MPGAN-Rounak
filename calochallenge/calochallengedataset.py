@@ -10,6 +10,7 @@ import h5py
 from calochallenge.xmlhandler import XMLHandler
 from calochallenge.highlevelfeatures import HighLevelFeatures as HLF
 import math
+import xml.etree.ElementTree as ET
 # from os.path import exists
 
 energy_cutoff = 1e-18
@@ -28,6 +29,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         num_features: int = 4,
         inc: List[int] = [],
         train_fraction: float = 0.7,
+        train_single_layer: int = -1,
+        num_layers: int = 5,
         logE: bool = True,
         logR: bool = True,
         use_mask: bool = False,
@@ -43,11 +46,13 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.num_particles = num_particles
         self.particle = particle
         self.num_features = num_features
+        self.num_layers = num_layers
         self.logE = logE
         self.logR = logR
         self.use_mask = use_mask
         self.inc = inc
         self.ignore_layer_12 = ignore_layer_12
+        self.train_single_layer = train_single_layer
 
         #only considering photon data for now        
         self.HLF_1_photons = HLF('photon', filename= self.data_dir + 'binning_dataset_1_photons.xml')  
@@ -58,27 +63,20 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.HLF_1_photons.CalculateFeatures(self.photon_file["showers"][:])
 
         dataset = self.format_data()
-
-        if self.num_particles != -1:
-            dataset = np.array(list(map(lambda x: x[x[:, 3].argsort()][-self.num_particles:], dataset)))
-
-        if self.use_mask:
-            mask = (dataset[:, :, 3:] != 0).astype(float)
-            dataset = np.concatenate((dataset, mask), axis=2)
-
         dataset = torch.from_numpy(dataset)
+        self.num_features = dataset.shape[2]
 
         if self.logE:
             dataset[:, :, 3] = torch.log(dataset[:, :, 3] + energy_cutoff)
 
-        if self.logR:
-            dataset[:, :, 2] = torch.log(dataset[:, :, 2])
-
-        self.num_features = dataset.shape[2]
         feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
         print('Max features: ', feature_maxes)
         feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
         print('Min features: ', feature_mins)
+
+        if self.use_mask:
+            mask = (dataset.numpy()[:, :, 3:] != 0).astype(float)
+            dataset = torch.from_numpy(np.concatenate((dataset, mask), axis=2))
 
         if self.normalize:
             self.normalize_features(dataset, feature_shifts=-0.5)
@@ -88,6 +86,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
             print('Min features: ', feature_mins)
 
+        if self.num_particles != -1:
+            dataset = torch.Tensor(np.array(list(map(lambda x: x[x[:, 3].argsort()][-self.num_particles:], dataset.numpy()))))
+
         if len(self.inc) != 0:
             data_inc = self.photon_file['incident_energies'][:]
             data_inc_sorted = np.sort(data_inc, axis=0).flatten()
@@ -95,6 +96,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             data_inc = data_inc.flatten()
             indices = [np.where(data_inc == element)[0] for element in energies]
             dataset = torch.from_numpy(np.concatenate([dataset[idx] for idx in indices]))
+
+        if self.train_single_layer != -1:
+            dataset = self.filter_single_layer(dataset)
 
         self.dataset = dataset
         jet_features = self.get_jet_features(dataset)
@@ -111,21 +115,33 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         Formats calochallenge dataset 1 based on the data given in .hdf5 and binning files
         """
         filename = self.data_dir + 'binning_dataset_1_' + self.particle + 's.xml'
-        xml = XMLHandler(self.particle, filename=filename)
+        xml = XMLHandler(self.particle, filename=filename, logR=self.logR)
         data = self.photon_file['showers'][:]
         Ne = data.shape[0]
         coordinates = np.empty((0, self.num_features - 1))
         layer_count = 0
         for layer in range(len(xml.GetTotalNumberOfRBins())):
             r_list, a_list = xml.fill_r_a_lists(layer)
-            stack = np.vstack(([layer_count]*len(r_list),a_list,r_list))
-            coordinates = np.vstack((coordinates, stack.T))
+            if len(r_list) > 0:
+                stack = np.vstack(([layer_count]*len(r_list),a_list,r_list))
+                coordinates = np.vstack((coordinates, stack.T))
             if len(r_list) > 0 or not self.ignore_layer_12:
                 layer_count += 1
         coordinates = np.tile(coordinates, (Ne, 1, 1))
         data_tile = np.tile(data.T, (1, 1, 1))
         point_cloud = np.vstack((coordinates.T, data_tile)).T
         return point_cloud
+    
+    def filter_single_layer(self, dataset: Tensor) -> Tensor:
+        """
+        Filters out data for a single layer
+        """
+        filter_layer = self.train_single_layer
+        Ne = dataset.shape[0]
+        new_dataset = dataset[dataset[:,:,0] == filter_layer]
+        #new_dataset = new_dataset.reshape(Ne, -1, self.num_features)
+        #print('filter layer dataset shape:', new_dataset.shape)
+        return dataset
 
 
     def get_jet_features(self, dataset: Tensor) -> Tensor:
@@ -181,7 +197,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         """
         num_features = dataset.shape[2]
 
-        feature_mins = [float(min(torch.min(dataset[:, :, i]), 0)) for i in range(num_features)]
+        feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(num_features)]
+        feature_mins[1] = -1.0*math.pi
        
         if isinstance(feature_norms, float):
             feature_norms = np.full(num_features, feature_norms)
@@ -192,7 +209,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         for i in range(num_features):
             dataset[:, :, i] -= feature_mins[i]
 
-        feature_maxes = [float(torch.max(torch.abs(dataset[:, :, i]))) for i in range(num_features)]
+        feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(num_features)]
+        feature_maxes[1] = 2 * math.pi
+
         self.feature_maxes = feature_maxes
         self.feature_mins = feature_mins
         self.feature_norms = feature_norms
@@ -248,7 +267,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             num_features = dataset.shape[2]
 
             for i in range(num_features):
-                if self.feature_shifts[i] is not None and self.feature_shifts[i] != 0:
+                if self.feature_shifts[i] is not None:
                     dataset[:, :, i] -= self.feature_shifts[i]
 
                 if self.feature_norms[i] is not None:
@@ -277,57 +296,52 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
     
     def get_boundaries(self):
         filename = self.data_dir + 'binning_dataset_1_' + self.particle + 's.xml'
-        xml = XMLHandler(self.particle, filename=filename)
-        l_list = []
-        r_list = []
-        alpha_list = []
+        tree = ET.parse(filename)
+        root = tree.getroot()
         layer_count = 0
-        for l in range(len(xml.GetTotalNumberOfRBins())):
-            r, alpha = xml.fill_r_a_lists(l)
-            r = list(set(r))
-            alpha = list(set(alpha))
-            if len(r) > 0:
-                l_list.append(layer_count)
-                if self.logR: r_list.append(torch.log(torch.Tensor(sorted(r))))
-                else: r_list.append(torch.Tensor(sorted(r)))
-                alpha_list.append(torch.Tensor(sorted(alpha)))
-            if len(r) > 0 or not self.ignore_layer_12: layer_count += 1
-        l_list = torch.Tensor(sorted(l_list))
-        l_list, alpha_list, r_list = self._normalize(l_list=l_list, alpha_list=alpha_list, r_list=r_list, feature_shifts=-0.5)
-        l_boundaries = []
-        alpha_boundaries = []
-        r_boundaries = []
-        l_boundaries = (l_list[:-1]+l_list[1:])/2
-        for alpha_layer in alpha_list:
-            alpha_boundaries.append((alpha_layer[:-1]+alpha_layer[1:])/2)
-        for r_layer in r_list:
-            r_boundaries.append((r_layer[:-1] + r_layer[1:])/2)
-        return l_boundaries, alpha_boundaries, r_boundaries
+        l_list = []
+        alpha_list = []
+        r_list = []
+        for particle in root:
+            for layer in particle:
+                str_r = layer.attrib.get('r_edges')
+                r = [float(s) for s in str_r.split(',')]
+                alpha = int(layer.attrib.get('n_bin_alpha'))
+                if len(r) > 1:
+                    l_list.append(layer_count)
+                    if self.logR: r_list.append(torch.log(torch.Tensor(sorted(r)[1:])))
+                    else: r_list.append(torch.Tensor(sorted(r)[1:]))
+                    alphas = np.linspace(-1.0*math.pi, math.pi, alpha+1)
+                    alpha_list.append(torch.from_numpy(alphas))
+                if len(r) > 1 or not self.ignore_layer_12: layer_count += 1
+        l_list = torch.Tensor(l_list)
+        l_list, alpha_list, r_list = self._normalize_feature_boundaries(l_list=l_list, alpha_list=alpha_list, r_list=r_list)
+        return l_list, alpha_list, r_list
     
-    def _normalize(self, 
+    def _normalize_feature_boundaries(self, 
         l_list, 
         alpha_list, 
         r_list,
-        feature_norms = 1.0,
-        feature_shifts = 0.0,
     ):
         if not self.normalize: return l_list, alpha_list, r_list
         l_norm, alpha_norm, r_norm = [], [], []
-        if l_list.nelement() != 0 and torch.max(l_list) != 0:
-            l_norm = torch.Tensor(l_list / torch.max(torch.abs(l_list)) * feature_norms + feature_shifts)
-        for i in range(len(r_list)):
-            if r_list[i].nelement() != 0 and torch.max(r_list[i]) != 0: 
-                r_norm.append(torch.Tensor(r_list[i] / torch.max(torch.abs(r_list[i])) * feature_norms + feature_shifts))
-        for i in range(len(alpha_list)):
-            if alpha_list[i].nelement() != 0:
-                alpha_shifted = alpha_list[i] - torch.min(alpha_list[i])
-                if torch.max(alpha_shifted) != 0:
-                    alpha_norm.append(torch.Tensor(alpha_shifted / torch.max(torch.abs(alpha_shifted)) * feature_norms + feature_shifts))
-                else:
-                    alpha_norm.append(alpha_shifted)
-            else:
-                alpha_norm.append(alpha_list[i])
+        l_norm = self._norm(data=l_list, ind=0)
+        for i in range(self.num_layers):
+            alpha_norm.append(self._norm(data=alpha_list[i], ind=1))
+            r_norm.append(self._norm(data=r_list[i], ind=2))
         return l_norm, alpha_norm, r_norm
+    
+    def _norm(self, data, ind):
+        if data.nelement() != 0:
+            data_shifted = data - self.feature_mins[ind]
+            if self.feature_maxes[ind] != 0:
+                data_norm = data_shifted / self.feature_maxes[ind] * self.feature_norms[ind] + self.feature_shifts[ind]
+                data_norm[data_norm < -0.5] = -0.5
+                data_norm[data_norm > 0.5] = 0.5
+                return data_norm
+            else:
+                return data_shifted
+        return data
 
     def __len__(self):
         return len(self.data)

@@ -793,3 +793,16 @@ def plot_xyz(data, data_inc, num_features=4, inc_num=1, num_thresholded=30, num_
         #ax.set_zlim(-0.5,0.5)
         ax.set_title(r'Event {}, E_inc = {} MeV'.format((i+1),E0))
         plt.show()
+
+def plot_events_hits(data, data_inc, inc_num=[], num_thresholded=30):
+    data_inc_sorted = np.sort(data_inc, axis=0).flatten()
+    energies = data_inc_sorted[inc_num]
+    data_inc = data_inc.flatten()
+    indices = [np.where(data_inc == element)[0] for element in energies]
+    data = np.concatenate([data[idx] for idx in indices])
+    if num_thresholded != -1:
+        data = np.array(list(map(lambda x: x[x[:, 3].argsort()][-num_thresholded:], data)), dtype = np.float32)
+    _, ax = plt.subplots()
+    print('Data shape:', data.shape)
+    ax.imshow(data[:,:,3])
+        

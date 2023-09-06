@@ -39,11 +39,10 @@ import logging
 r_idx = 2
 alpha_idx = 1
 z_idx = 0
+e_idx = 3
 shift = -0.5
 offset = 0.5
 num_layers = 5
-min_layer = 0
-max_layer = 12
 normalize = True
 ignore_layer_12 = True
 # edges for binning z values
@@ -82,6 +81,7 @@ def main():
         normalize=args.normalize,
         train_fraction=args.ttsplit,
         ignore_layer_12=args.ignore_layer_12,
+        train_single_layer=args.train_single_layer,
         inc=[80000]
     )
 
@@ -97,6 +97,7 @@ def main():
         normalize=args.normalize,
         train_fraction=args.ttsplit,
         ignore_layer_12=args.ignore_layer_12,
+        train_single_layer=args.train_single_layer,
         inc=[80000]
     )
     X_test_loaded = DataLoader(X_test, batch_size=args.batch_size, pin_memory=True)
@@ -123,6 +124,9 @@ def main():
     global r_boundaries
     global alpha_boundaries
     z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
+    logging.info('z boundaries:', z_boundaries)
+    logging.info('alpha boundaries:', alpha_boundaries)
+    logging.info('r boundaries:', r_boundaries)
 
     train(
         args,
@@ -142,20 +146,38 @@ def main():
     )
 
 def normalize_input(
-        data: Tensor,
+        bins: Tensor,
         idx: int,
         layer: int = -1,
-        feature_norms: Union[float, List[float]] = 1.0,
-        feature_shifts: Union[float, List[float]] = 0.0,
         ):
-        if not normalize: return data
+        if not normalize: return bins
         boundaries = z_boundaries, alpha_boundaries, r_boundaries
-        if idx > 0: data_max = boundaries[idx][layer].size(dim=0)
-        else: data_max =  boundaries[idx].size(dim=0)
-        if data.nelement() != 0 and data_max != 0: return data / data_max * feature_norms + feature_shifts
-        return data
+        boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
+
+        def normalize_bins(bin):
+            if bin == 0: return -0.5
+            elif bin == boundary_layer.size(dim=0): return 0.5
+            else: return boundary_layer[bin] if idx == 0 else (boundary_layer[bin-1] + boundary_layer[bin]) / 2
         
-        
+        bin_centres = []
+
+        if idx == 0:
+            bin_centres.append([[normalize_bins(hit) for hit in hits] for hits in bins])
+        else:
+            bin_centres.append([normalize_bins(hits) for hits in bins])
+
+        return torch.Tensor(bin_centres)
+
+def normalize_energies(
+        bins: Tensor,
+        idx: int
+        ):
+        if not normalize: return bins
+        boundaries = z_boundaries, alpha_boundaries, r_boundaries
+        '''for i in range(len(bins)):
+            bins[i] = (boundaries[idx][bins[i]] + boundaries[idx][bins[i]+1])/2'''
+        return bins
+       
 
 def get_gen_noise(
     model_args,
@@ -208,7 +230,7 @@ class BucketizeFunction(torch.autograd.Function):
         # set values to bin centers, taking care of normalisation
 
         z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
-        input[:, :, z_idx] = normalize_input(data=z_bins, idx=z_idx, feature_shifts=shift)
+        input[:, :, z_idx] = normalize_input(bins=z_bins, idx=z_idx)
         
         # lambda function to map eta and phi to different z
         for i in range(num_layers):
@@ -220,12 +242,13 @@ class BucketizeFunction(torch.autograd.Function):
             alpha_bins = torch.bucketize(
                 filter_layer[:, alpha_idx], alpha_boundaries[i].to(input.device)
             )
-            filter_layer[:, alpha_idx] = normalize_input(data=alpha_bins, idx=alpha_idx, layer=i, feature_shifts=shift)
+            filter_layer[:, alpha_idx] = normalize_input(bins=alpha_bins, idx=alpha_idx, layer=i)
 
             r_bins = torch.bucketize(
-                    filter_layer[:, r_idx], r_boundaries[i].to(input.device)
-                )
-            filter_layer[:, r_idx] = normalize_input(data=r_bins, idx=r_idx, layer=i, feature_shifts=shift)
+                filter_layer[:, r_idx], r_boundaries[i].to(input.device)
+            )
+            filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
+            #print('Radial features:', torch.unique(filter_layer[:, r_idx]))
 
             input[filter] = filter_layer
 
@@ -807,6 +830,7 @@ def make_plots_calochallenge(
     losses_path,
     save_epochs=5,
     loss="ls",
+    logE=True,
     logR=True
 ):
     """Plot histograms, jet images, loss curves, and evaluation curves"""
@@ -819,6 +843,7 @@ def make_plots_calochallenge(
         name=name + "h",
         figs_path=figs_path,
         show=False,
+        logE=logE,
         logR=logR,
     )
 
@@ -830,6 +855,7 @@ def make_plots_calochallenge(
         name=name + "lh",
         figs_path=figs_path,
         show=False,
+        logE=logE,
         logR=logR,
     )
 
@@ -912,6 +938,7 @@ def eval_save_plot(
             args.losses_path,
             save_epochs=args.save_epochs,
             loss=args.loss,
+            logE=args.logE,
             logR=args.logR
         )
 

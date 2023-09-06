@@ -110,6 +110,13 @@ def parse_args():
         help="model discriminator, mpgan default is mpgan, rgan. graphcnngan, treegan default is rgan, pcgan default is pcgan, gapt default is gapt",
         choices=["mpgan", "rgan", "pointnet", "pcgan"],
     )
+    parser.add_argument(
+        "--train-single-layer",
+        type=int,
+        default=-1,
+        help="whether to train single layer or not, if value != -1, then use the layer to train data ",
+        choices=[-1, 0, 1, 2, 3, 4],
+    )
 
     add_bool_arg(parser, "use-mask", "Mask 0 energies or not", default=True)
     add_bool_arg(parser, "normalize", "Normalize values or not", default=True)
