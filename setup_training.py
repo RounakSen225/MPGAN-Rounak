@@ -114,7 +114,7 @@ def parse_args():
         "--train-single-layer",
         type=int,
         default=-1,
-        help="whether to train single layer or not, if value != -1, then use the layer to train data ",
+        help="layer index to train single layer or not, if value != -1, then use the layer to train data ",
         choices=[-1, 0, 1, 2, 3, 4],
     )
 

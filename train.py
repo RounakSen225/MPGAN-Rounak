@@ -45,6 +45,7 @@ offset = 0.5
 num_layers = 5
 normalize = True
 ignore_layer_12 = True
+logR = True
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
@@ -52,6 +53,10 @@ ignore_layer_12 = True
 r_boundaries = []
 alpha_boundaries = []
 z_boundaries = []
+
+boundaries_abs = None
+
+feature_stats = None
 
 
 def main():
@@ -117,16 +122,23 @@ def main():
 
     global normalize
     global ignore_layer_12
+    global logR
     normalize = args.normalize
     ignore_layer_12 = args.ignore_layer_12
+    logR = args.logR
 
+    global feature_stats
+    feature_stats = X_train.get_feature_stats()
+
+    global boundaries_abs
     global z_boundaries
     global r_boundaries
     global alpha_boundaries
     z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
-    logging.info('z boundaries:', z_boundaries)
-    logging.info('alpha boundaries:', alpha_boundaries)
-    logging.info('r boundaries:', r_boundaries)
+    boundaries_abs = X_train.get_abs_boundaries()
+    print('z boundaries:', z_boundaries)
+    print('alpha boundaries:', alpha_boundaries)
+    print('r boundaries:', r_boundaries)
 
     train(
         args,
@@ -152,31 +164,51 @@ def normalize_input(
         ):
         if not normalize: return bins
         boundaries = z_boundaries, alpha_boundaries, r_boundaries
-        boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
+        if idx == 2 and logR:
+            boundary_layer = boundaries_abs[idx][layer]
+        else:
+            boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
 
         def normalize_bins(bin):
-            if bin == 0: return -0.5
-            elif bin == boundary_layer.size(dim=0): return 0.5
-            else: return boundary_layer[bin] if idx == 0 else (boundary_layer[bin-1] + boundary_layer[bin]) / 2
-        
-        bin_centres = []
+            i = bin
+            if bin == 0:
+                i = bin + 1
+            elif bin == len(boundary_layer):
+                i = bin - 1
+            return (boundary_layer[i] + boundary_layer[i-1])/2
 
-        if idx == 0:
-            bin_centres.append([[normalize_bins(hit) for hit in hits] for hits in bins])
+
+        if idx == 2: 
+            print('Before bucketization: Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(bins)))
+
+        if idx > 0:
+            values = torch.Tensor(np.vectorize(normalize_bins)(bins.numpy())) if bins.nelement() != 0 else bins
+            if idx == 2:
+                if logR:
+                    values = torch.log(values)
+                values = normalize_values(data=values, ind=idx)
+                print('Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(values)))
         else:
-            bin_centres.append([normalize_bins(hits) for hits in bins])
+            values = normalize_values(data=bins, ind=idx)
 
-        return torch.Tensor(bin_centres)
+        return values
 
-def normalize_energies(
-        bins: Tensor,
-        idx: int
+def normalize_values(
+        data: Tensor,
+        ind: int  = 3, 
         ):
-        if not normalize: return bins
-        boundaries = z_boundaries, alpha_boundaries, r_boundaries
-        '''for i in range(len(bins)):
-            bins[i] = (boundaries[idx][bins[i]] + boundaries[idx][bins[i]+1])/2'''
-        return bins
+        if not normalize: return data
+        feature_maxes, feature_mins, feature_norms, feature_shifts = feature_stats
+        if data.nelement() != 0:
+            data_shifted = data - feature_mins[ind]
+            if feature_maxes[ind] != 0:
+                data_norm = data_shifted / feature_maxes[ind] * feature_norms[ind] + feature_shifts[ind]
+                data_norm[data_norm < -0.5] = -0.5
+                data_norm[data_norm > 0.5] = 0.5
+                return data_norm
+            else:
+                return data_shifted
+        return data
        
 
 def get_gen_noise(
@@ -248,9 +280,11 @@ class BucketizeFunction(torch.autograd.Function):
                 filter_layer[:, r_idx], r_boundaries[i].to(input.device)
             )
             filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
-            #print('Radial features:', torch.unique(filter_layer[:, r_idx]))
+            print('Radial features:', torch.unique(filter_layer[:, r_idx]))
 
             input[filter] = filter_layer
+
+        #input[:, :, e_idx] = normalize_values(data=input[:, :, e_idx])
 
         input = torch.round(input, decimals=4)  
         return input

@@ -266,6 +266,7 @@ def get_midpoint_arr(arr):
 
 def get_gen_data_for_layer(x, i, arr):
     n = len(arr)
+    if n == 1: return x
     midpoint = get_midpoint_arr(arr)
     if i == 0:
         return x[x[:,0]<midpoint[0]]
@@ -303,9 +304,10 @@ def plot_layerwise_hit_feats_calochallenge(
     fig.suptitle(" ")
 
     layers = sorted(list(set(parts_real[:,0])))
-    subfigs = fig.subfigures(nrows=len(layers), ncols=1)
+    subfigs = fig.subfigures(nrows=len(layers)+1, ncols=1)
 
     for i, subfig in enumerate(subfigs):
+        if i == len(layers): continue
         axs = subfig.subplots(nrows=1, ncols=3)
         subfig.suptitle(f"Layer {round(layers[i])}")
         for j in range(1, 4):
