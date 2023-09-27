@@ -182,7 +182,7 @@ def normalize_input(
             print('Before bucketization: Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(bins)))
 
         if idx > 0:
-            values = torch.Tensor(np.vectorize(normalize_bins)(bins.numpy())) if bins.nelement() != 0 else bins
+            values = torch.Tensor(np.vectorize(normalize_bins)(bins.cpu().numpy())) if bins.nelement() != 0 else bins
             if idx == 2:
                 if logR:
                     values = torch.log(values)
