@@ -176,18 +176,14 @@ def normalize_input(
             elif bin == len(boundary_layer):
                 i = bin - 1
             return (boundary_layer[i] + boundary_layer[i-1])/2
-
-
-        if idx == 2: 
-            print('Before bucketization: Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(bins)))
-
+        
         if idx > 0:
             values = torch.Tensor(np.vectorize(normalize_bins)(bins.detach().cpu().numpy())) if bins.nelement() != 0 else bins
             if idx == 2:
                 if logR:
                     values = torch.log(values)
                 values = normalize_values(data=values, ind=idx)
-                print('Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(values)))
+                #print('Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(values)))
         else:
             values = normalize_values(data=bins, ind=idx)
 
@@ -263,6 +259,8 @@ class BucketizeFunction(torch.autograd.Function):
 
         z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
         input[:, :, z_idx] = normalize_input(bins=z_bins, idx=z_idx)
+
+        #print('Radial feature minimum value before STE:', torch.min(input[:, :, r_idx]))
         
         # lambda function to map eta and phi to different z
         for i in range(num_layers):
@@ -280,7 +278,7 @@ class BucketizeFunction(torch.autograd.Function):
                 filter_layer[:, r_idx], r_boundaries[i].to(input.device)
             )
             filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
-            print('Radial features:', torch.unique(filter_layer[:, r_idx]))
+            #print('Radial features:', torch.unique(filter_layer[:, r_idx]))
 
             input[filter] = filter_layer
 

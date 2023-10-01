@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 # from os.path import exists
 
 energy_cutoff = 1e-18
+r_cutoff = 1e-2
 
 class CaloChallengeDataset(torch.utils.data.Dataset):
     _num_non_mask_features = 4
@@ -71,7 +72,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             dataset[:, :, 3] = torch.log(dataset[:, :, 3] + energy_cutoff)
 
         if self.logR:
-            dataset[:, :, 2] = torch.log(dataset[:, :, 2])
+            dataset[:, :, 2] = torch.log(dataset[:, :, 2] + r_cutoff)
 
         feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
         print('Max features: ', feature_maxes)
@@ -85,6 +86,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             print('Max features: ', feature_maxes)
             feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
             print('Min features: ', feature_mins)
+
+        #print('Radial features:', torch.unique(dataset[:, :, 2]))
 
         if self.train_single_layer != -1:
             dataset = self.filter_single_layer(dataset)
@@ -313,7 +316,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             dataset[:, :, 3] = torch.exp(dataset[:, :, 3]) - energy_cutoff
 
         if self.logR:
-            dataset[:, :, 2] = torch.exp(dataset[:, :, 2])
+            dataset[:, :, 2] = torch.exp(dataset[:, :, 2]) - r_cutoff
 
         dataset[:, :, -1] += 0.5
 
@@ -344,8 +347,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
                 alpha = int(layer.attrib.get('n_bin_alpha'))
                 if len(r) > 1:
                     l_list.append(layer_count)
-                    if self.logR: r_list_log.append(torch.log(torch.Tensor(sorted(r)[1:])))
-                    r_list.append(torch.Tensor(sorted(r)[1:]))
+                    if self.logR: r_list_log.append(torch.log(torch.Tensor(sorted(r)) + r_cutoff))
+                    r_list.append(torch.Tensor(sorted(r)) + r_cutoff)
                     alphas = np.linspace(-1.0*math.pi, math.pi, alpha+1)
                     alpha_list.append(torch.from_numpy(alphas))
                 if len(r) > 1 or not self.ignore_layer_12: layer_count += 1
