@@ -46,6 +46,7 @@ num_layers = 5
 normalize = True
 ignore_layer_12 = True
 logR = True
+train_single_layer = -1
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
@@ -55,7 +56,6 @@ alpha_boundaries = []
 z_boundaries = []
 
 boundaries_abs = None
-
 feature_stats = None
 
 
@@ -122,9 +122,11 @@ def main():
 
     global normalize
     global ignore_layer_12
+    global train_single_layer
     global logR
     normalize = args.normalize
     ignore_layer_12 = args.ignore_layer_12
+    train_single_layer = args.train_single_layer
     logR = args.logR
 
     global feature_stats
@@ -135,6 +137,7 @@ def main():
     global r_boundaries
     global alpha_boundaries
     z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
+
     boundaries_abs = X_train.get_abs_boundaries()
     print('z boundaries:', z_boundaries)
     print('alpha boundaries:', alpha_boundaries)
@@ -878,7 +881,6 @@ def make_plots_calochallenge(
         logE=logE,
         logR=logR,
     )
-
     plotting.plot_layerwise_hit_feats_calochallenge(
         real_jets,
         gen_jets,

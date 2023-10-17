@@ -303,7 +303,7 @@ def plot_layerwise_hit_feats_calochallenge(
     fig = plt.figure(figsize=(22, 22), constrained_layout=True)
     fig.suptitle(" ")
 
-    layers = sorted(list(set(parts_real[:,0])))
+    layers = sorted(list(set(parts_gen[:,0])))
     subfigs = fig.subfigures(nrows=len(layers)+1, ncols=1)
 
     for i, subfig in enumerate(subfigs):
