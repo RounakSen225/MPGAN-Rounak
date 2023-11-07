@@ -125,7 +125,9 @@ def plot_hit_feats_calochallenge(
 
     fig = plt.figure(figsize=(16, 16))
 
-    for i in range(4):
+    num_features = parts_real.shape[1]
+
+    for i in range(num_features):
         fig.add_subplot(2, 2, i + 1)
         plt.ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
         real = parts_real[:,i]
@@ -292,6 +294,8 @@ def plot_layerwise_hit_feats_calochallenge(
     # plabels = plabels_dict[coords]
     num_features = real_jets.shape[2]
 
+    if num_features == 1: return
+
     if real_mask is not None:
         parts_real = real_jets[real_mask]
         parts_gen = gen_jets[gen_mask]      
@@ -310,7 +314,7 @@ def plot_layerwise_hit_feats_calochallenge(
         if i == len(layers): continue
         axs = subfig.subplots(nrows=1, ncols=3)
         subfig.suptitle(f"Layer {round(layers[i])}")
-        for j in range(1, 4):
+        for j in range(1, num_features):
             real = parts_real[parts_real[:,0] == layers[i]][:,j]
             gen = get_gen_data_for_layer(parts_gen, i, layers)[:,j]
             if logE and j == 3:

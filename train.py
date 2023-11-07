@@ -47,6 +47,7 @@ normalize = True
 ignore_layer_12 = True
 logR = True
 train_single_layer = -1
+train_single_feature = -1
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
@@ -87,9 +88,9 @@ def main():
         train_fraction=args.ttsplit,
         ignore_layer_12=args.ignore_layer_12,
         train_single_layer=args.train_single_layer,
+        train_single_feature=args.train_single_feature,
         inc=[80000]
     )
-
     X_train_loaded = DataLoader(X_train, shuffle=True, batch_size=args.batch_size, pin_memory=True)
 
     X_test = CaloChallengeDataset(
@@ -103,6 +104,7 @@ def main():
         train_fraction=args.ttsplit,
         ignore_layer_12=args.ignore_layer_12,
         train_single_layer=args.train_single_layer,
+        train_single_feature=args.train_single_feature,
         inc=[80000]
     )
     X_test_loaded = DataLoader(X_test, batch_size=args.batch_size, pin_memory=True)
@@ -122,11 +124,13 @@ def main():
 
     global normalize
     global ignore_layer_12
+    global train_single_feature
     global train_single_layer
     global logR
     normalize = args.normalize
     ignore_layer_12 = args.ignore_layer_12
     train_single_layer = args.train_single_layer
+    train_single_feature = args.train_single_feature
     logR = args.logR
 
     global feature_stats
@@ -167,41 +171,41 @@ def normalize_input(
         ):
         if not normalize: return bins
         boundaries = z_boundaries, alpha_boundaries, r_boundaries
-        if idx == 2 and logR:
-            boundary_layer = boundaries_abs[idx][layer]
-        else:
-            boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
+        if idx == 2 and logR: boundary_layer = boundaries_abs[idx][layer]
+        else: boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
 
         def normalize_bins(bin):
             i = bin
-            if bin == 0:
-                i = bin + 1
-            elif bin == len(boundary_layer):
-                i = bin - 1
+            if bin == 0: i = bin + 1
+            elif bin == len(boundary_layer): i = bin - 1
             return (boundary_layer[i] + boundary_layer[i-1])/2
         
-        if idx > 0:
+        if idx:
             values = torch.Tensor(np.vectorize(normalize_bins)(bins.detach().cpu().numpy())) if bins.nelement() != 0 else bins
             if idx == 2:
-                if logR:
-                    values = torch.log(values)
+                if logR: values = torch.log(values)
                 values = normalize_values(data=values, ind=idx)
-                #print('Values for feature {} and layer {}: {}'.format(idx, layer, torch.unique(values)))
-        else:
-            values = normalize_values(data=bins, ind=idx)
+        else: values = normalize_values(data=bins, ind=idx)
 
         return values
 
 def normalize_values(
         data: Tensor,
-        ind: int  = 3, 
+        ind: int = 3, 
+        use_train_feature_stats: bool = True,
         ):
         if not normalize: return data
         feature_maxes, feature_mins, feature_norms, feature_shifts = feature_stats
+        min_feature = feature_mins[ind]
+        if not use_train_feature_stats:
+            min_feature = torch.min(data)
         if data.nelement() != 0:
-            data_shifted = data - feature_mins[ind]
-            if feature_maxes[ind] != 0:
-                data_norm = data_shifted / feature_maxes[ind] * feature_norms[ind] + feature_shifts[ind]
+            data_shifted = data - min_feature
+            max_feature = feature_maxes[ind]
+            if not use_train_feature_stats:
+                max_feature = torch.max(data_shifted)
+            if max_feature != 0:
+                data_norm = data_shifted / max_feature * feature_norms[ind] + feature_shifts[ind]
                 data_norm[data_norm < -0.5] = -0.5
                 data_norm[data_norm > 0.5] = 0.5
                 return data_norm
@@ -259,15 +263,14 @@ class BucketizeFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         # set values to bin centers, taking care of normalisation
-
         z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
         input[:, :, z_idx] = normalize_input(bins=z_bins, idx=z_idx)
-
-        #print('Radial feature minimum value before STE:', torch.min(input[:, :, r_idx]))
         
         # lambda function to map eta and phi to different z
         for i in range(num_layers):
             # need to check whether z_b corresponds to current z values
+            if train_single_feature == 0: break
+
             filter = z_bins == i
 
             filter_layer = input[filter]
@@ -281,7 +284,6 @@ class BucketizeFunction(torch.autograd.Function):
                 filter_layer[:, r_idx], r_boundaries[i].to(input.device)
             )
             filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
-            #print('Radial features:', torch.unique(filter_layer[:, r_idx]))
 
             input[filter] = filter_layer
 
@@ -372,7 +374,8 @@ def gen(
     semi_gen_data  = G(noise, labels, global_noise)
 
     ste = BucketizeSTE(device)
-    gen_data = ste(semi_gen_data)
+    #gen_data = ste(semi_gen_data)
+    gen_data = semi_gen_data
     
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:

@@ -13,11 +13,10 @@ import math
 import xml.etree.ElementTree as ET
 # from os.path import exists
 
-energy_cutoff = 1e-18
-r_cutoff = 1e-2
+feature_cutoff = [0, 0, 1e-2, 1e-18]
 
 class CaloChallengeDataset(torch.utils.data.Dataset):
-    _num_non_mask_features = 4
+    
 
     def __init__(
         self,
@@ -36,7 +35,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         logR: bool = True,
         use_mask: bool = False,
         train: bool = False,
-        ignore_layer_12: bool = True
+        ignore_layer_12: bool = True,
+        train_single_feature: int = -1
     ):
         self.data_dir = data_dir
         self.feature_norms = feature_norms
@@ -53,62 +53,40 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.logR = logR
         self.use_mask = use_mask
         self.inc = inc
+        self.train = train
         self.ignore_layer_12 = ignore_layer_12
         self.train_single_layer = train_single_layer
+        self.train_single_feature = train_single_feature
+        self._num_non_mask_features = 4 if self.train_single_feature == -1 else 1
 
-        #only considering photon data for now        
-        self.HLF_1_photons = HLF('photon', filename= self.data_dir + 'binning_dataset_1_photons.xml')  
-        if train:
-            self.photon_file = h5py.File(self.data_dir + 'dataset_1_photons_1.hdf5', 'r')
-        else:
-            self.photon_file = h5py.File(self.data_dir + 'dataset_1_photons_2.hdf5', 'r')
-        self.HLF_1_photons.CalculateFeatures(self.photon_file["showers"][:])
-
+        self.set_particle_features()
         dataset = self.format_data()
-        dataset = torch.from_numpy(dataset)
 
         if self.use_mask:
-            mask = (dataset.numpy()[:, :, 3:] != 0).astype(float)
-            dataset = torch.from_numpy(np.concatenate((dataset, mask), axis=2))
-            #dataset[:, :, -1] -= 0.5
-        
-        self.num_features = dataset.shape[2]
+            dataset = self.apply_mask(dataset)
 
         if self.logE:
-            dataset[:, :, 3] = torch.log(dataset[:, :, 3] + energy_cutoff)
+            dataset[:, :, 3] = self.apply_log(dataset, 3)
 
         if self.logR:
-            dataset[:, :, 2] = torch.log(dataset[:, :, 2] + r_cutoff)
-        
-        feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
-        print('Max features: ', feature_maxes)
-        feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
-        print('Min features: ', feature_mins)
+            dataset[:, :, 2] = self.apply_log(dataset, 2)
 
         if self.normalize:
             self.normalize_features(dataset, feature_shifts=-0.5)
-            print('\nAfter normalization: \n')
-            feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(self.num_features)]
-            print('Max features: ', feature_maxes)
-            feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(self.num_features)]
-            print('Min features: ', feature_mins)
 
         if len(self.inc) != 0:
-            data_inc = self.photon_file['incident_energies'][:]
-            data_inc_sorted = np.sort(data_inc, axis=0).flatten()
-            energies = data_inc_sorted[self.inc]
-            data_inc = data_inc.flatten()
-            indices = [np.where(data_inc == element)[0] for element in energies]
-            dataset = torch.from_numpy(np.concatenate([dataset[idx] for idx in indices]))
+            dataset = self.filter_by_incident_energies(dataset)
 
         if self.train_single_layer != -1:
             dataset = self.filter_single_layer(dataset)
 
         if self.num_particles != -1:
-            dataset = torch.Tensor(np.array(list(map(lambda x: x[x[:, 3].argsort()][-self.num_particles:], dataset.numpy()))))
+            dataset = self.get_top_n_energies(dataset)
 
-        self.dataset = dataset
         jet_features = self.get_jet_features(dataset)
+
+        if self.train_single_feature != -1:
+            dataset = self.get_single_feature(dataset)
 
         tcut = int(len(dataset) * train_fraction)
         self.data = dataset[:tcut] if train else dataset[tcut:]
@@ -117,7 +95,38 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         print('Data shape: ', self.data.shape)
         logging.info("Dataset processed")
 
-    def format_data(self):
+    def get_top_n_energies(self, dataset: Tensor) -> Tensor:
+        top_energy_dataset = torch.Tensor(np.array(list(map(lambda x: x[x[:, 3].argsort()][-self.num_particles:], dataset.numpy()))))
+        return top_energy_dataset
+
+    def set_particle_features(self):
+        #only considering photon data for now        
+        self.HLF_1_photons = HLF('photon', filename= self.data_dir + 'binning_dataset_1_photons.xml')  
+        if self.train:
+            self.photon_file = h5py.File(self.data_dir + 'dataset_1_photons_1.hdf5', 'r')
+        else:
+            self.photon_file = h5py.File(self.data_dir + 'dataset_1_photons_2.hdf5', 'r')
+        self.HLF_1_photons.CalculateFeatures(self.photon_file["showers"][:])
+
+    def apply_mask(self, dataset: Tensor) -> Tensor:
+        mask = (dataset.numpy()[:, :, 3:] != 0).astype(float)
+        masked_dataset = torch.from_numpy(np.concatenate((dataset, mask), axis=2))
+        return masked_dataset
+    
+    def apply_log(self, dataset: Tensor, index: int) -> Tensor:
+        feature = torch.log(dataset[:, :, index] + feature_cutoff[index])
+        return feature
+    
+    def filter_by_incident_energies(self, dataset: Tensor) -> Tensor:
+        data_inc = self.photon_file['incident_energies'][:]
+        data_inc_sorted = np.sort(data_inc, axis=0).flatten()
+        energies = data_inc_sorted[self.inc]
+        data_inc = data_inc.flatten()
+        indices = [np.where(data_inc == element)[0] for element in energies]
+        dataset = torch.from_numpy(np.concatenate([dataset[idx] for idx in indices]))
+        return dataset
+
+    def format_data(self) -> Tensor:
         """
         Formats calochallenge dataset 1 based on the data given in .hdf5 and binning files
         """
@@ -137,7 +146,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         coordinates = np.tile(coordinates, (Ne, 1, 1))
         data_tile = np.tile(data.T, (1, 1, 1))
         point_cloud = np.vstack((coordinates.T, data_tile)).T
-        return point_cloud
+        return torch.from_numpy(point_cloud)
     
     def filter_single_layer(self, dataset: Tensor) -> Tensor:
         """
@@ -184,6 +193,12 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         jet_num_particles = (torch.sum(dataset[:, :, -1], dim=1) / self.num_particles).unsqueeze(1)
         logging.debug("{num_particles = }")
         return jet_num_particles
+    
+    def get_single_feature(self, dataset: Tensor) -> Tensor:
+        f = self.train_single_feature
+        fn = dataset.shape[2]
+        data = dataset.numpy()[:, :, np.r_[f:f+1, fn-1:fn]]
+        return torch.from_numpy(data)
 
     #@classmethod
     def normalize_features(
@@ -219,8 +234,11 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         """
         num_features = dataset.shape[2]
+        feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(num_features)]
+        print('Max features: ', feature_maxes)
 
         feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(num_features)]
+        print('Min features: ', feature_mins)
         feature_mins[1] = -1.0 * math.pi
        
         if isinstance(feature_norms, float):
@@ -250,6 +268,12 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
             if feature_shifts[i] is not None:
                 dataset[:, :, i] += feature_shifts[i]
+        
+        print('\nAfter normalization: \n')
+        feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(num_features)]
+        print('Max features: ', feature_maxes)
+        feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(num_features)]
+        print('Min features: ', feature_mins)
 
         return feature_maxes
 
@@ -261,7 +285,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         is_real_data: bool = False,
         zero_mask_particles: bool = True,
         zero_neg_pt: bool = True,
-    ):
+    ) -> Tensor:
         """
         Inverts the ``normalize_features()`` function on the input ``dataset`` array or tensor,
         plus optionally zero's the masked particles and negative pTs.
@@ -286,10 +310,15 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         """
         if self.normalize:
             #raise RuntimeError("Can't unnormalize features if dataset has not been normalized.")
+            num_features = dataset.shape[2]
+            features = []
 
-            num_features = self.num_features
+            if self.train_single_feature == -1:
+                features = range(num_features)
+            else:
+                features = [0, -1]
 
-            for i in range(num_features):
+            for i in features:
                 if self.feature_maxes[i] == 0: continue
                 if self.feature_shifts[i] is not None:
                     dataset[:, :, i] -= self.feature_shifts[i]
@@ -298,25 +327,28 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
                     dataset[:, :, i] /= self.feature_norms[i]
                     dataset[:, :, i] *= self.feature_maxes[i]
 
-            for i in range(num_features):
+            for i in features:
                 dataset[:, :, i] += self.feature_mins[i]
-
-        if self.logE:
-            dataset[:, :, 3] = torch.exp(dataset[:, :, 3]) - energy_cutoff
-
-        if self.logR:
-            dataset[:, :, 2] = torch.exp(dataset[:, :, 2]) - r_cutoff
-
-        #dataset[:, :, -1] += 0.5
 
         mask = dataset[:, :, -1] >= 0.5 if self.use_mask else None
 
         if not is_real_data and zero_mask_particles and self.use_mask:
             dataset[~mask] = 0
 
+        if self.train_single_feature != -1: 
+            return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
+
         if not is_real_data and zero_neg_pt:
             dataset[:, :, 2][dataset[:, :, 2] < 0] = 0
             dataset[:, :, 0][dataset[:, :, 0] < 0] = 0
+
+        if self.logE:
+            dataset[:, :, 3] = torch.exp(dataset[:, :, 3]) - feature_cutoff[3]
+
+        if self.logR:
+            dataset[:, :, 2] = torch.exp(dataset[:, :, 2]) - feature_cutoff[2]
+
+        #dataset[:, :, -1] += 0.5
 
         return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
     
@@ -336,8 +368,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
                 alpha = int(layer.attrib.get('n_bin_alpha'))
                 if len(r) > 1:
                     l_list.append(layer_count)
-                    if self.logR: r_list_log.append(torch.log(torch.Tensor(sorted(r)) + r_cutoff))
-                    r_list.append(torch.Tensor(sorted(r)) + r_cutoff)
+                    if self.logR: r_list_log.append(torch.log(torch.Tensor(sorted(r)) + feature_cutoff[2]))
+                    r_list.append(torch.Tensor(sorted(r)) + feature_cutoff[2])
                     alphas = np.linspace(-1.0*math.pi, math.pi, alpha+1)
                     alpha_list.append(torch.from_numpy(alphas))
                 if len(r) > 1 or not self.ignore_layer_12: layer_count += 1
@@ -360,7 +392,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             r_norm.append(self._norm(data=r_list[i], ind=2))
         return l_norm, alpha_norm, r_norm
     
-    def _norm(self, data, ind):
+    def _norm(self, data: Tensor, ind: int) -> Tensor:
         if data.nelement() != 0:
             data_shifted = data - self.feature_mins[ind]
             if self.feature_maxes[ind] != 0:

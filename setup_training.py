@@ -114,8 +114,15 @@ def parse_args():
         "--train-single-layer",
         type=int,
         default=-1,
-        help="layer index to train single layer or not, if value != -1, then use the layer to train data ",
+        help="layer index to indicate whether to train single layer or not, if value != -1, then use the layer value to train data ",
         choices=[-1, 0, 1, 2, 3, 4],
+    )
+    parser.add_argument(
+        "--train-single-feature",
+        type=int,
+        default=-1,
+        help="feature index to indicate whether to train single feature or not, if value != -1, then use the feature value to train data ",
+        choices=[-1, 0, 1, 2, 3],
     )
 
     add_bool_arg(parser, "use-mask", "Mask 0 energies or not", default=True)
