@@ -191,21 +191,14 @@ def normalize_input(
 
 def normalize_values(
         data: Tensor,
-        ind: int = 3, 
-        use_train_feature_stats: bool = True,
+        ind: int = 3,
         ):
         if not normalize: return data
         feature_maxes, feature_mins, feature_norms, feature_shifts = feature_stats
-        min_feature = feature_mins[ind]
-        if not use_train_feature_stats:
-            min_feature = torch.min(data)
         if data.nelement() != 0:
-            data_shifted = data - min_feature
-            max_feature = feature_maxes[ind]
-            if not use_train_feature_stats:
-                max_feature = torch.max(data_shifted)
-            if max_feature != 0:
-                data_norm = data_shifted / max_feature * feature_norms[ind] + feature_shifts[ind]
+            data_shifted = data - feature_mins[ind]
+            if feature_maxes[ind] != 0:
+                data_norm = data_shifted / feature_maxes[ind] * feature_norms[ind] + feature_shifts[ind]
                 data_norm[data_norm < -0.5] = -0.5
                 data_norm[data_norm > 0.5] = 0.5
                 return data_norm
@@ -374,8 +367,8 @@ def gen(
     semi_gen_data  = G(noise, labels, global_noise)
 
     ste = BucketizeSTE(device)
-    #gen_data = ste(semi_gen_data)
-    gen_data = semi_gen_data
+    gen_data = ste(semi_gen_data)
+    #gen_data = semi_gen_data
     
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
