@@ -362,13 +362,15 @@ def gen(
             model_args, num_samples, num_particles, model, device, noise_std
         )
 
-   
-    global_noise = torch.randn(num_samples, model_args['global_noise_dim']).to(device) if G.noise_conditioning else None
-    semi_gen_data  = G(noise, labels, global_noise)
+    if model == 'gapt':
+        global_noise = torch.randn(num_samples, model_args['global_noise_dim']).to(device) if G.noise_conditioning else None
+        semi_gen_data  = G(noise, labels, global_noise)
+    elif model == 'mpgan':
+        semi_gen_data = G(noise, labels)
 
     ste = BucketizeSTE(device)
-    #gen_data = ste(semi_gen_data)
-    gen_data = semi_gen_data
+    gen_data = ste(semi_gen_data)
+    #gen_data = semi_gen_data
     
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
