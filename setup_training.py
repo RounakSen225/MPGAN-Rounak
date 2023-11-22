@@ -129,6 +129,7 @@ def parse_args():
     add_bool_arg(parser, "normalize", "Normalize values or not", default=True)
     add_bool_arg(parser, "logR", "Normalize values or not", default=True)
     add_bool_arg(parser, "ignore-layer-12", "Normalize values or not", default=False)
+    add_bool_arg(parser, "ste-enable", "Whether to implement straight through estimation during trainig", default=True)
 
 
     # Chenged load-model so that without the flag the model will not be loaded

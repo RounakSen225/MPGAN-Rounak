@@ -48,6 +48,7 @@ ignore_layer_12 = True
 logR = True
 train_single_layer = -1
 train_single_feature = -1
+ste_enable = True
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
@@ -127,11 +128,13 @@ def main():
     global train_single_feature
     global train_single_layer
     global logR
+    global ste_enable
     normalize = args.normalize
     ignore_layer_12 = args.ignore_layer_12
     train_single_layer = args.train_single_layer
     train_single_feature = args.train_single_feature
     logR = args.logR
+    ste_enable = args.ste_enable
 
     global feature_stats
     feature_stats = X_train.get_feature_stats()
@@ -369,9 +372,10 @@ def gen(
         semi_gen_data = G(noise, labels)
 
     ste = BucketizeSTE(device)
-    gen_data = ste(semi_gen_data)
-    #gen_data = semi_gen_data
-    
+    if ste_enable:
+        gen_data = ste(semi_gen_data)
+    else:
+        gen_data = semi_gen_data
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
         # TODO: add pt_cutoff to extra_args
