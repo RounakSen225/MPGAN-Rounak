@@ -115,6 +115,8 @@ def plot_hit_feats_calochallenge(
 
     # plabels = plabels_dict[coords]
 
+    #print('Number of particle in real data:', len(real_jets.reshape(-1, real_jets.shape[2])[:, 0]))
+    #print('Number of particle in generated data:', len(gen_jets.reshape(-1, gen_jets.shape[2])[:, 0]))
 
     if real_mask is not None:
         parts_real = real_jets[real_mask]

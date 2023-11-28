@@ -371,10 +371,10 @@ def gen(
     elif model == 'mpgan':
         semi_gen_data = G(noise, labels)
 
-    ste = BucketizeSTE(device)
     if ste_enable:
+        ste = BucketizeSTE(device)
         gen_data = ste(semi_gen_data)
-    else:
+    else: 
         gen_data = semi_gen_data
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:

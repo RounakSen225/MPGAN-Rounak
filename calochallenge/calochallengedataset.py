@@ -169,7 +169,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             zero_padding = np.zeros((padding_rows, Nf))
             zero_padding[:, 0] = filter_layer
             temp_array = np.vstack((temp_array, zero_padding))
-        elif num_rows > t:
+        else:
             temp_array = temp_array[:Ne * t]
 
         temp_array = temp_array.reshape(-1, t, Nf)

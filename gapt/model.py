@@ -394,7 +394,8 @@ class GAPT_G(nn.Module):
         )
 
     def forward(self, x: Tensor, labels: Tensor = None, z: Tensor = None):
-        x, labels, z = x.float(), labels.float(), z.float()
+        x, labels = x.float(), labels.float()
+        if z is not None: z = z.float()
         if self.use_mask:
             # unnormalize the last jet label - the normalized # of particles per jet
             # (between 1/``num_particles`` and 1) - to between 0 and ``num_particles`` - 1
