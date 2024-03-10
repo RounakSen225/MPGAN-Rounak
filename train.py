@@ -307,13 +307,15 @@ class BucketizeFunction(torch.autograd.Function):
 class GumbelSoftmaxSTE(torch.autograd.Function):
 
     def _gumbel_softmax(x: Tensor, boundaries: Tensor, idx: int, r: float = 1e-3, layer: int = -1, tau:float = 1.0) -> Tensor:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         if idx == 2 and logR: 
             bin_indices = boundaries_abs[idx][layer]
         elif idx: 
             bin_indices = boundaries[idx][layer]
         else: 
             bin_indices = boundaries[idx]
-        bin_indices = bin_indices.device
+        bin_indices = bin_indices.to(device)
+        x = x.to(device)
         diffs = x.unsqueeze(-1) - bin_indices.unsqueeze(0)
         diffs_abs = torch.abs(diffs)
         gumbel_noise = -torch.log(-torch.log(torch.rand_like(diffs_abs) + threshold) + threshold)
