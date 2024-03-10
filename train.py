@@ -313,7 +313,7 @@ class GumbelSoftmaxSTE(torch.autograd.Function):
             bin_indices = boundaries[idx][layer]
         else: 
             bin_indices = boundaries[idx]
-        
+        bin_indices = bin_indices.device
         diffs = x.unsqueeze(-1) - bin_indices.unsqueeze(0)
         diffs_abs = torch.abs(diffs)
         gumbel_noise = -torch.log(-torch.log(torch.rand_like(diffs_abs) + threshold) + threshold)
