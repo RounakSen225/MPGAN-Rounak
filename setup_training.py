@@ -101,7 +101,7 @@ def parse_args():
         type=str,
         default="mpgan",
         help="model to run",
-        choices=["mpgan", "rgan", "graphcnngan", "treegan", "pcgan", "gapt"],
+        choices=["mpgan", "rgan", "graphcnngan", "treegan", "pcgan", "gapt", "linear_gan"],
     )
     parser.add_argument(
         "--model-D",
@@ -129,7 +129,7 @@ def parse_args():
     add_bool_arg(parser, "normalize", "Normalize values or not", default=True)
     add_bool_arg(parser, "logR", "Normalize values or not", default=True)
     add_bool_arg(parser, "ignore-layer-12", "Normalize values or not", default=False)
-    add_bool_arg(parser, "ste-enable", "Whether to implement straight through estimation during trainig", default=True)
+    add_bool_arg(parser, "ste-enable", "Whether to implement straight through estimation during training", default=True)
 
 
     # Chenged load-model so that without the flag the model will not be loaded
@@ -208,6 +208,7 @@ def parse_args():
 
     parser.add_argument("--seed", type=int, default=4, help="torch seed")
 
+    parse_linear_gan_args(parser)
     parse_mpgan_args(parser)
     parse_masking_args(parser)
     parse_optimization_args(parser)
@@ -434,6 +435,13 @@ def parse_mnist_args(parser):
     parser.add_argument(
         "--fid-eval-samples", type=int, default=8192, help="# of samples for evaluating fid"
     )
+
+
+def parse_linear_gan_args(parser):
+    parser.add_argument("--input-size", type=int, default=200, help="number of hits")
+    parser.add_argument("--d-hidden", type=int, default=512, help="number of hits")
+    parser.add_argument("--g-hidden", type=int, default=128, help="number of hits")
+    parser.add_argument("--tau", type=float, default=0.001, help="number of hits")
 
 
 def parse_mpgan_args(parser):
@@ -701,8 +709,6 @@ def parse_gapt_args(parser):
     )
     add_bool_arg(parser, "use-custom-mab", "use a custom (Stelzner's) implementation of MAB in GAPT", default=False)
 
-
-
 def parse_ext_models_args(parser):
     parser.add_argument("--latent-dim", type=int, default=128, help="")
 
@@ -886,6 +892,7 @@ def process_args(args):
 
     process_optimization_args(args)
     process_regularization_args(args)
+
     process_mpgan_args(args)
     process_gapt_args(args)
     process_masking_args(args)
@@ -931,6 +938,9 @@ def process_optimization_args(args):
                 else:
                     args.batch_size = 32
 
+        elif args.model == "linear_gan" or args.model_D == "linear_gan":
+            args.batch_size = 64
+
     if args.lr_disc == 0:
         if args.model == "mpgan":
             if args.jets == "g":
@@ -971,7 +981,6 @@ def process_regularization_args(args):
         args.spectral_norm_disc, args.spectral_norm_gen = True, True
     if args.layer_norm:
         args.layer_norm_disc, args.layer_norm_gen = True, True
-
 
 def process_mpgan_args(args):
     if not args.mp_iters_gen:
@@ -1037,6 +1046,8 @@ def process_external_models_args(args):
             args.model_D = "pcgan"
         elif args.model == "gapt":
             args.model_D = "gapt"
+        elif args.model == "linear_gan":
+            args.model_D = "linear_gan"
         else:
             args.model_D = "rgan"
 
@@ -1280,6 +1291,37 @@ def init():
     args = load_args(args)
     return args
 
+def setup_linear_gan(args, gen, num_features, boundaries):
+    from linear_gan import Generator, Discriminator
+
+    num_hits = args.num_hits
+    data_dimension_size = num_hits * num_features
+    args.data_dimension_size = data_dimension_size
+    args.loss = 'og'
+
+    disc_args = {
+        "input_size": args.data_dimension_size,
+        "hidden_size": args.d_hidden
+    }
+
+    gen_args = {
+        "input_size": args.input_size,
+        "hidden_size": args.g_hidden,
+        "output_size": args.data_dimension_size,
+        "tau": args.tau,
+        "num_features": num_features,
+        "all_feature_edges": boundaries,
+        "ste_enable": args.ste_enable
+    }
+
+    if gen:
+        return Generator(
+            **gen_args
+        )
+    else:
+        return Discriminator(
+            **disc_args
+        )
 
 def setup_mpgan(args, gen):
     """Setup MPGAN models"""
@@ -1462,7 +1504,7 @@ def setup_gapt(args, gen):
             linear_args=linear_args,
         )
 
-def models(args, gen_only=False):
+def models(args, num_features=5, boundaries=[], gen_only=False):
     """Set up generator and discriminator models, either new or loaded from a state dict"""
     # TODO try to check the model here
     if args.model == "mpgan":
@@ -1493,6 +1535,11 @@ def models(args, gen_only=False):
 
         G = Graph_GAN(gen=True, args=deepcopy(args))
 
+    elif args.model == "linear_gan":
+        from linear_gan import Generator
+
+        G = setup_linear_gan(args=args, gen=True, num_features=num_features, boundaries=boundaries)
+
     if gen_only:
         return G
 
@@ -1518,6 +1565,11 @@ def models(args, gen_only=False):
         from mpgan import Graph_GAN
 
         G = Graph_GAN(gen=False, args=deepcopy(args))
+
+    elif args.model_D == "linear_gan":
+        from linear_gan import Discriminator
+
+        D = setup_linear_gan(args=args, gen=False, num_features=num_features, boundaries=boundaries)
 
     if args.load_model:
         try:
@@ -1602,6 +1654,11 @@ def get_model_args(args):
                 "global_noise_dim": args.global_noise_input_dim
             }
         model_args["embed_dim"] = args.gapt_embed_dim
+    elif args.model == "linear_gan":
+        model_args["input_size"] = args.input_size
+        model_args["d_hidden"] = args.d_hidden
+        model_args["g_hidden"] = args.g_hidden
+        model_args["data_dimension_size"] = args.data_dimension_size
     elif args.model == "rgan" or args.model == "graphcnngan":
         model_args = {"latent_dim": args.latent_dim}
     elif args.model == "treegan":

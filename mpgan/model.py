@@ -511,7 +511,6 @@ class MPNet(nn.Module):
         x = self._pre_mp(x, labels)
 
         x, use_mask, mask, num_jet_particles = self._get_mask(x, labels, **self.mask_args)
-
         # message passing
         for i in range(self.mp_iters):
             x = self.mp_layers[i](x, use_mask, mask, labels, num_jet_particles)

@@ -17,7 +17,6 @@ feature_cutoff = [0, 0, 1e-2, 1e-18]
 
 class CaloChallengeDataset(torch.utils.data.Dataset):
     
-
     def __init__(
         self,
         data_dir: str = "./datasets/",
@@ -33,7 +32,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         num_layers: int = 5,
         logE: bool = True,
         logR: bool = True,
-        use_mask: bool = False,
+        use_mask: bool = True,
         train: bool = False,
         ignore_layer_12: bool = True,
         train_single_feature: int = -1
@@ -71,11 +70,11 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if self.logR:
             dataset[:, :, 2] = self.apply_log(dataset, 2)
 
-        if self.normalize:
-            self.normalize_features(dataset, feature_shifts=-0.5)
-
         if len(self.inc) != 0:
             dataset = self.filter_by_incident_energies(dataset)
+
+        if self.num_particles != -1:
+            dataset = self.get_top_n_energies(dataset)
 
         if self.train_single_layer != -1:
             dataset = self.filter_single_layer(dataset)
@@ -84,9 +83,12 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             dataset = self.get_top_n_energies(dataset)
 
         jet_features = self.get_jet_features(dataset)
-
+        
         if self.train_single_feature != -1:
             dataset = self.get_single_feature(dataset)
+
+        if self.normalize:
+            self.normalize_features(dataset, feature_shifts=-0.5)
 
         tcut = int(len(dataset) * train_fraction)
         self.data = dataset[:tcut] if train else dataset[tcut:]
@@ -155,7 +157,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if not self.normalize or not self.ignore_layer_12:
             raise RuntimeError("Can't filter data if dataset has not been normalized or layer 12 is not ignored!")
         
-        filter_layer = -0.5 + 0.25 * self.train_single_layer
+        filter_layer = self.train_single_layer
 
         print('Filter layer: ', filter_layer)
 
@@ -197,8 +199,13 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
     def get_single_feature(self, dataset: Tensor) -> Tensor:
         f = self.train_single_feature
         fn = dataset.shape[2]
-        data = dataset.numpy()[:, :, np.r_[f:f+1, fn-1:fn]]
-        return torch.from_numpy(data)
+        if self.use_mask:
+            if f != 3:
+                raise RuntimeError("Cannot consider mask feature if energy feature is not present")
+            data = torch.from_numpy(dataset.numpy()[:, :, np.r_[f:f+1, fn-1:fn]])
+        else:
+            data = dataset[:, :, f:f+1]
+        return data
 
     #@classmethod
     def normalize_features(
@@ -250,6 +257,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         for i in range(num_features):
             dataset[:, :, i] -= feature_mins[i]
 
+        
         feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(num_features)]
         feature_maxes[1] = 2 * math.pi
 
@@ -266,6 +274,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
                 dataset[:, :, i] /= feature_maxes[i]
                 dataset[:, :, i] *= feature_norms[i]
 
+        for i in range(num_features):
             if feature_shifts[i] is not None:
                 dataset[:, :, i] += feature_shifts[i]
         
@@ -308,6 +317,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             ``[num_jets, num_particles, num_features (excluding mask)]`` and another binary mask
             tensor/array of shape ``[num_jets, num_particles, 1]``.
         """
+        if not self.normalize:
+            raise RuntimeError("Can't unnormalize features if dataset has not been normalized.")
+        
         if self.normalize:
             #raise RuntimeError("Can't unnormalize features if dataset has not been normalized.")
             num_features = dataset.shape[2]
@@ -316,18 +328,16 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             if self.train_single_feature == -1:
                 features = range(num_features)
             else:
-                features = [0, -1]
+                features = [0] if not self.use_mask else [0, -1]
 
             for i in features:
-                if self.feature_maxes[i] == 0: continue
                 if self.feature_shifts[i] is not None:
                     dataset[:, :, i] -= self.feature_shifts[i]
 
                 if self.feature_norms[i] is not None:
                     dataset[:, :, i] /= self.feature_norms[i]
-                    dataset[:, :, i] *= self.feature_maxes[i]
 
-            for i in features:
+                dataset[:, :, i] *= self.feature_maxes[i]
                 dataset[:, :, i] += self.feature_mins[i]
 
         mask = dataset[:, :, -1] >= 0.5 if self.use_mask else None
@@ -336,7 +346,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             dataset[~mask] = 0
 
         if self.train_single_feature != -1: 
-            return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
+            return (dataset[:, :, :self._num_non_mask_features], mask) if ret_mask_separate else (dataset[:, :, :self._num_non_mask_features], None)
 
         if not is_real_data and zero_neg_pt:
             dataset[:, :, 2][dataset[:, :, 2] < 0] = 0
@@ -350,7 +360,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         #dataset[:, :, -1] += 0.5
 
-        return dataset[:, :, :self._num_non_mask_features], mask if ret_mask_separate else dataset
+        return (dataset[:, :, :self._num_non_mask_features], mask) if ret_mask_separate else (dataset[:, :, :self._num_non_mask_features], None)
     
     def get_boundaries(self):
         filename = self.data_dir + 'binning_dataset_1_' + self.particle + 's.xml'

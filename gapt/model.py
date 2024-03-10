@@ -394,7 +394,9 @@ class GAPT_G(nn.Module):
         )
 
     def forward(self, x: Tensor, labels: Tensor = None, z: Tensor = None):
-        x, labels = x.float(), labels.float()
+        x = x.float()
+        if labels is not None:
+            labels = labels.float()
         if z is not None: z = z.float()
         if self.use_mask:
             # unnormalize the last jet label - the normalized # of particles per jet
@@ -419,7 +421,7 @@ class GAPT_G(nn.Module):
         # Concatenate global noise and # particles depending on conditioning
         if self.n_normalized:
             num_jet_particles = labels[:, -1]
-        else:
+        elif self.use_mask:
             num_jet_particles += 1
         if self.noise_conditioning or self.n_conditioning:
             if self.noise_conditioning and self.n_conditioning:
@@ -542,7 +544,9 @@ class GAPT_D(nn.Module):
         )
 
     def forward(self, x: Tensor, labels: Tensor = None):
-        x, labels = x.float(), labels.float()
+        x = x.float()
+        if labels is not None: 
+            labels = labels.float()
         if self.use_mask:
             mask = x[..., -1:] + 0.5
             x = x[..., :-1]
@@ -553,7 +557,7 @@ class GAPT_D(nn.Module):
         
         # Use # particles for conditioning
         z = None
-        if self.n_conditioning:
+        if  self.n_conditioning:
             if self.n_normalized:
                 num_jet_particles = labels[:, -1]
             else:

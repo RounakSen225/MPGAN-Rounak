@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
 from torch.distributions.normal import Normal
+import torch.nn.functional as F
 import math
 
 import numpy as np
@@ -49,6 +50,8 @@ logR = True
 train_single_layer = -1
 train_single_feature = -1
 ste_enable = True
+eps = 1e-1
+threshold = 1e-10
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
@@ -114,7 +117,21 @@ def main():
     # print(torch.max(X_train.view(-1, 30 * 4), axis=0))
     # print(torch.max(X_test.view(-1, 30 * 4), axis=0))
 
-    G, D = setup_training.models(args)
+    global z_boundaries
+    global boundaries_abs
+    global r_boundaries
+    global alpha_boundaries
+    global all_feature_edges
+
+    global feature_stats
+    feature_stats = X_train.get_feature_stats()
+
+    z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
+    if args.model == 'linear_gan':
+        z_boundaries = torch.Tensor([0.0, 0.25, 0.5, 0.75, 1.0]) + feature_stats[-1][0]
+    all_feature_edges =  z_boundaries, alpha_boundaries, r_boundaries
+    linear_gan_args = {'num_features': X_train.data.shape[2], 'boundaries': all_feature_edges}
+    G, D = setup_training.models(args=args, **linear_gan_args)
     model_train_args, model_eval_args, extra_args = setup_training.get_model_args(args)
     logging.info("Models loaded")
 
@@ -135,15 +152,6 @@ def main():
     train_single_feature = args.train_single_feature
     logR = args.logR
     ste_enable = args.ste_enable
-
-    global feature_stats
-    feature_stats = X_train.get_feature_stats()
-
-    global boundaries_abs
-    global z_boundaries
-    global r_boundaries
-    global alpha_boundaries
-    z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
 
     boundaries_abs = X_train.get_abs_boundaries()
     print('z boundaries:', z_boundaries)
@@ -178,6 +186,7 @@ def normalize_input(
         else: boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
 
         def normalize_bins(bin):
+            bin = round(bin)
             i = bin
             if bin == 0: i = bin + 1
             elif bin == len(boundary_layer): i = bin - 1
@@ -186,7 +195,7 @@ def normalize_input(
         if idx:
             values = torch.Tensor(np.vectorize(normalize_bins)(bins.detach().cpu().numpy())) if bins.nelement() != 0 else bins
             if idx == 2:
-                if logR: values = torch.log(values)
+                if logR: values = torch.log(values + threshold)
                 values = normalize_values(data=values, ind=idx)
         else: values = normalize_values(data=bins, ind=idx)
 
@@ -226,6 +235,8 @@ def get_gen_noise(
     dist = Normal(torch.tensor(0.0).to(device), torch.tensor(noise_std).to(device))
     point_noise = None
 
+    if model == "linear_gan":
+        return None, None
     if model == "mpgan" or model == "old_mpgan":
         if model_args["lfc"]:
             noise = dist.sample((num_samples, model_args["lfc_latent_size"]))
@@ -291,15 +302,56 @@ class BucketizeFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         return torch.nn.functional.hardtanh(grad_output)
+    
+# Maybe not necessary? Can use the forward directly in Bucketize?
+class GumbelSoftmaxSTE(torch.autograd.Function):
 
+    def _gumbel_softmax(x: Tensor, boundaries: Tensor, idx: int, r: float = 1e-3, layer: int = -1, tau:float = 1.0) -> Tensor:
+        if idx == 2 and logR: 
+            bin_indices = boundaries_abs[idx][layer]
+        elif idx: 
+            bin_indices = boundaries[idx][layer]
+        else: 
+            bin_indices = boundaries[idx]
+        
+        diffs = x.unsqueeze(-1) - bin_indices.unsqueeze(0)
+        diffs_abs = torch.abs(diffs)
+        gumbel_noise = -torch.log(-torch.log(torch.rand_like(diffs_abs) + threshold) + threshold)
+        gumbel_softmax_probs = F.softmax(((-diffs_abs + r * gumbel_noise) / tau), dim=-1)
+        bin_indices = torch.arange(len(bin_indices))
+        feature_soft_binned = torch.sum(gumbel_softmax_probs * bin_indices, dim=-1)
+        feature_soft_binned = normalize_input(bins=feature_soft_binned, idx=idx, layer=layer)
+        return feature_soft_binned
+        
+    @staticmethod
+    def forward(ctx, input):
+        input[:, :, z_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=input[:, :, z_idx], boundaries=all_feature_edges, idx=0, tau=1e-3)
+        for i in range(num_layers):
+            if train_single_feature == 0: break
+            filter = abs(input[:, :, z_idx] - i) < eps
+            filter_layer = input[filter]
+            filter_layer[:, alpha_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=filter_layer[:, alpha_idx], boundaries=all_feature_edges, idx = 1, layer=i, tau=1e-3)
+            filter_layer[:, r_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=filter_layer[:, r_idx], boundaries=all_feature_edges, idx = 2, layer=i, tau=1e-3)
+            input[filter] = filter_layer
 
-class BucketizeSTE(torch.nn.Module):
-    def __init__(self, device):
+        return input
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return torch.nn.functional.hardtanh(grad_output)
+    
+
+class StraightThroughEstimator(torch.nn.Module):
+    def __init__(self, device, method = 'G'):
         self.device = device
-        super(BucketizeSTE, self).__init__()
+        self.method = method
+        super(StraightThroughEstimator, self).__init__()
 
     def forward(self, x):
-        x = BucketizeFunction.apply(x)
+        if self.method == 'B':
+            x = BucketizeFunction.apply(x)
+        elif self.method == 'G':
+            x = GumbelSoftmaxSTE.apply(x)
         return x
 
 
@@ -370,11 +422,14 @@ def gen(
         semi_gen_data  = G(noise, labels, global_noise)
     elif model == 'mpgan':
         semi_gen_data = G(noise, labels)
+    elif model == 'linear_gan':
+        z = torch.rand(num_samples, model_args["input_size"])
+        semi_gen_data = G(z)
 
     if ste_enable:
-        ste = BucketizeSTE(device)
+        ste = StraightThroughEstimator(device)
         gen_data = ste(semi_gen_data)
-    else: 
+    else:
         gen_data = semi_gen_data
    
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
@@ -812,6 +867,7 @@ def make_plots(
         show=False,
     )
 
+
     plotting.plot_layerwise_hit_feats(
         real_jets,
         gen_jets,
@@ -883,17 +939,19 @@ def make_plots_calochallenge(
         logE=logE,
         logR=logR,
     )
-    plotting.plot_layerwise_hit_feats_calochallenge(
-        real_jets,
-        gen_jets,
-        real_mask,
-        gen_mask,
-        name=name + "lh",
-        figs_path=figs_path,
-        show=False,
-        logE=logE,
-        logR=logR,
-    )
+
+    if train_single_layer == -1:
+        plotting.plot_layerwise_hit_feats_calochallenge(
+            real_jets,
+            gen_jets,
+            real_mask,
+            gen_mask,
+            name=name + "lh",
+            figs_path=figs_path,
+            show=False,
+            logE=logE,
+            logR=logR,
+        )
 
     if len(losses["G"]) > 1:
         plotting.plot_losses(losses, loss=loss, name=name, losses_path=losses_path, show=False)
@@ -956,6 +1014,7 @@ def eval_save_plot(
     gen_jets = gen_jets.numpy()
     if gen_mask is not None:
         gen_mask = gen_mask.numpy()
+
 
 
     

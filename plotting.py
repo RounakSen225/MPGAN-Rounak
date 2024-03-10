@@ -20,16 +20,18 @@ plabels_dict = {
 
 LAYER_SPECS = [(3, 96), (12, 12), (12, 6)]
 
+bins = 51
+
 #Change this if incident energies are different than 65.5 GeV
 plabels = ["z", r"$\alpha$", "r", "E (GeV)"]
 pbins = [
-    np.linspace(0, 5, 51),
-    np.linspace(-4, 4, 51),
-    np.linspace(0, 500, 51),
-    np.linspace(0, 10000000, 51)
+    np.linspace(-0.5, 5.5, 51),
+    np.linspace(-4.5, 4.5, 51),
+    np.linspace(-0.5, 500.5, 51),
+    np.linspace(-0.5, 10000000.5, 51)
 ]
 
-
+threshold = 1e-20
 # from guppy import hpy
 
 # h = hpy()
@@ -135,17 +137,17 @@ def plot_hit_feats_calochallenge(
         real = parts_real[:,i]
         gen = parts_gen[:,i]
         if logE and i == 3:
-            real = np.log(real[real > 0])
-            gen = np.log(gen[gen > 0])
+            real = np.log(real[real > 0] + threshold)
+            gen = np.log(gen[gen > 0] + threshold)
             plabels[i] = "log(E) (GeV)"
             pbins[i] = np.linspace(-2, 10, 51)
         elif logR and i == 2:
-            real = np.log(real[real > 0])
-            gen = np.log(gen[gen > 0])
+            real = np.log(real[real > 0] + threshold)
+            gen = np.log(gen[gen > 0] + threshold)
             plabels[i] = "log(r)"
             pbins[i] = np.linspace(-1, 5, 51)
-        plt.hist(real, bins = pbins[i], log=True, density=False, histtype='step', label='Real', color = 'red')
-        plt.hist(gen, bins = pbins[i], log=True, density=False, histtype='step', label='Generated', color = 'blue')
+        plt.hist(real, bins = pbins[i], density=False, histtype='step', label='Real', color = 'red', log = True)
+        plt.hist(gen, bins = pbins[i], density=False, histtype='step', label='Generated', color = 'blue', log = True)
         plt.xlabel(plabels[i])
         plt.ylabel('Number of hits')
         plt.legend(loc=1, prop={"size": 18})
@@ -310,7 +312,7 @@ def plot_layerwise_hit_feats_calochallenge(
     fig.suptitle(" ")
 
     layers = sorted(list(set(parts_gen[:,0])))
-    subfigs = fig.subfigures(nrows=len(layers)+1, ncols=1)
+    subfigs = fig.subfigures(nrows=len(set([round(layer) for layer in layers]))+1, ncols=1)
 
     for i, subfig in enumerate(subfigs):
         if i == len(layers): continue
@@ -320,19 +322,19 @@ def plot_layerwise_hit_feats_calochallenge(
             real = parts_real[parts_real[:,0] == layers[i]][:,j]
             gen = get_gen_data_for_layer(parts_gen, i, layers)[:,j]
             if logE and j == 3:
-                real = np.log(real[real > 0])
-                gen = np.log(gen[gen > 0])
+                real = np.log(real[real > 0] + threshold)
+                gen = np.log(gen[gen > 0] + threshold)
                 plabels[j] = "log(E) (GeV)"
                 pbins[j] = np.linspace(-3, 15, 51)
             elif logR and j == 2:
-                real = np.log(real[real > 0])
-                gen = np.log(gen[gen > 0])
+                real = np.log(real[real > 0] + threshold)
+                gen = np.log(gen[gen > 0] + threshold)
                 plabels[j] = "log(r)"
                 pbins[j] = np.linspace(-1, 5, 51)
             axs[j-1].ticklabel_format(axis="y", scilimits=(0, 0), useMathText=True)
             axs[j-1].hist(real, bins = pbins[j], density=False, histtype='step', label='Real', color = 'red', log = True)
             if len(gen) > 0:
-                axs[j-1].hist(gen, bins = pbins[j], density=False, histtype='step', label='Generated', color = 'blue', log = True)
+                axs[j-1].hist(gen, bins = pbins[j], density=False, histtype='step', label='Generated', color = 'blue', log  = True)
             axs[j-1].set_xlabel(plabels[j])
             axs[j-1].set_ylabel('Number of hits')
             axs[j-1].legend()
