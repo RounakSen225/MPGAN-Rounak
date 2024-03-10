@@ -246,7 +246,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         feature_mins = [float(torch.min(dataset[:, :, i])) for i in range(num_features)]
         print('Min features: ', feature_mins)
-        feature_mins[1] = -1.0 * math.pi
+        #feature_mins[1] = -1.0 * math.pi
        
         if isinstance(feature_norms, float):
             feature_norms = np.full(num_features, feature_norms)
@@ -259,7 +259,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
         
         feature_maxes = [float(torch.max(dataset[:, :, i])) for i in range(num_features)]
-        feature_maxes[1] = 2 * math.pi
+        #feature_maxes[1] = 2 * math.pi
 
         self.feature_maxes = feature_maxes
         self.feature_mins = feature_mins
