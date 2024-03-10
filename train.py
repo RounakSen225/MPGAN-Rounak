@@ -66,7 +66,7 @@ feature_stats = None
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    #torch.autograd.set_detect_anomalxy(False)
+    #torch.autograd.set_detect_anomaly(False)
 
     args = setup_training.init()
     torch.manual_seed(args.seed)

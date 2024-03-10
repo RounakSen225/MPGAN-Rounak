@@ -83,12 +83,12 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             dataset = self.get_top_n_energies(dataset)
 
         jet_features = self.get_jet_features(dataset)
-        
-        if self.train_single_feature != -1:
-            dataset = self.get_single_feature(dataset)
 
         if self.normalize:
             self.normalize_features(dataset, feature_shifts=-0.5)
+        
+        if self.train_single_feature != -1:
+            dataset = self.get_single_feature(dataset)
 
         tcut = int(len(dataset) * train_fraction)
         self.data = dataset[:tcut] if train else dataset[tcut:]
