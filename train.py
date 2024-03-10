@@ -317,10 +317,10 @@ class GumbelSoftmaxSTE(torch.autograd.Function):
         bin_indices = bin_indices.to(device)
         x = x.to(device)
         diffs = x.unsqueeze(-1) - bin_indices.unsqueeze(0)
-        diffs_abs = torch.abs(diffs)
+        diffs_abs = torch.abs(diffs).to(device)
         gumbel_noise = -torch.log(-torch.log(torch.rand_like(diffs_abs) + threshold) + threshold).to(device)
-        gumbel_softmax_probs = F.softmax(((-diffs_abs + r * gumbel_noise) / tau), dim=-1)
-        bin_indices = torch.arange(len(bin_indices))
+        gumbel_softmax_probs = F.softmax(((-diffs_abs + r * gumbel_noise) / tau), dim=-1).to(device)
+        bin_indices = torch.arange(len(bin_indices)).to(device)
         feature_soft_binned = torch.sum(gumbel_softmax_probs * bin_indices, dim=-1)
         feature_soft_binned = normalize_input(bins=feature_soft_binned, idx=idx, layer=layer)
         return feature_soft_binned
