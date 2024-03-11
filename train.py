@@ -6,7 +6,7 @@ from jetnet.datasets.normalisations import FeaturewiseLinearBounded, Featurewise
 
 from jetnet import evaluation'''
 
-from typing import List, Union
+from typing import List
 import setup_training
 from mpgan import augment, mask_manual
 import plotting
@@ -20,12 +20,10 @@ from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
 from torch.distributions.normal import Normal
 import torch.nn.functional as F
-import math
 
 import numpy as np
 
 from os import remove
-from os.path import exists
 
 from tqdm import tqdm
 
@@ -66,7 +64,7 @@ feature_stats = None
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    #torch.autograd.set_detect_anomaly(False)
+    torch.autograd.set_detect_anomaly(True)
 
     args = setup_training.init()
     torch.manual_seed(args.seed)
@@ -211,9 +209,7 @@ def normalize_values(
             data_shifted = data - feature_mins[ind]
             if feature_maxes[ind] != 0:
                 data_norm = data_shifted / feature_maxes[ind] * feature_norms[ind] + feature_shifts[ind]
-                data_norm[data_norm < -0.5] = -0.5
-                data_norm[data_norm > 0.5] = 0.5
-                return data_norm
+                return torch.clamp(data_norm, min=-0.5, max=0.5)
             else:
                 return data_shifted
         return data
@@ -308,6 +304,7 @@ class GumbelSoftmaxSTE(torch.autograd.Function):
 
     def _gumbel_softmax(x: Tensor, boundaries: Tensor, idx: int, r: float = 1e-3, layer: int = -1, tau:float = 1.0) -> Tensor:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        bin_indices = None
         if idx == 2 and logR: 
             bin_indices = boundaries_abs[idx][layer]
         elif idx: 
@@ -320,14 +317,15 @@ class GumbelSoftmaxSTE(torch.autograd.Function):
         diffs_abs = torch.abs(diffs).to(device)
         gumbel_noise = -torch.log(-torch.log(torch.rand_like(diffs_abs) + threshold) + threshold).to(device)
         gumbel_softmax_probs = F.softmax(((-diffs_abs + r * gumbel_noise) / tau), dim=-1).to(device)
-        bin_indices = torch.arange(len(bin_indices)).to(device)
-        feature_soft_binned = torch.sum(gumbel_softmax_probs * bin_indices, dim=-1)
-        feature_soft_binned = normalize_input(bins=feature_soft_binned, idx=idx, layer=layer)
-        return feature_soft_binned
+        bin_indices_new = torch.arange(len(bin_indices)).to(device)
+        feature_soft_binned = torch.sum(gumbel_softmax_probs * bin_indices_new, dim=-1)
+        feature_soft_binned_new = normalize_input(bins=feature_soft_binned, idx=idx, layer=layer)
+        return feature_soft_binned_new
         
     @staticmethod
     def forward(ctx, input):
         input[:, :, z_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=input[:, :, z_idx], boundaries=all_feature_edges, idx=0, tau=1e-3)
+        
         for i in range(num_layers):
             if train_single_feature == 0: break
             filter = abs(input[:, :, z_idx] - i) < eps
@@ -355,7 +353,6 @@ class StraightThroughEstimator(torch.nn.Module):
         elif self.method == 'G':
             x = GumbelSoftmaxSTE.apply(x)
         return x
-
 
 def gen(
     model_args: dict,
@@ -430,7 +427,7 @@ def gen(
 
     if ste_enable:
         ste = StraightThroughEstimator(device)
-        gen_data = ste(semi_gen_data)
+        gen_data = ste(semi_gen_data.clone())
     else:
         gen_data = semi_gen_data
    
