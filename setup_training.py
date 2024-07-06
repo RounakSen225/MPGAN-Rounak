@@ -277,6 +277,7 @@ def parse_optimization_args(parser):
 
 
 def parse_regularization_args(parser):
+    add_bool_arg(parser, "batch-norm", "use batch normalization in G and D", default=False)
     add_bool_arg(parser, "batch-norm-disc", "use batch normalization", default=False)
     add_bool_arg(parser, "batch-norm-gen", "use batch normalization", default=False)
     add_bool_arg(parser, "spectral-norm", "use spectral normalization in G and D", default=False)
@@ -307,6 +308,7 @@ def parse_regularization_args(parser):
 def parse_evaluation_args(parser):
     add_bool_arg(parser, "fpnd", "calc fpnd", default=False)
     add_bool_arg(parser, "fpd", "calc fpd (coming soon)", default=False)
+    add_bool_arg(parser, "kpd", "calc kpd", default=True)
     add_bool_arg(parser, "efp", "calc w1efp", default=False)
     # parser.add_argument("--fid-eval-size", type=int, default=8192, help="number of samples generated for evaluating fid")
     parser.add_argument(
@@ -638,7 +640,7 @@ def parse_gapt_args(parser):
     parser.add_argument(
         "--num-isab-nodes",
         type=int,
-        default=10,
+        default=1,
         help="number of induced nodes in ISAB blocks, if using ISAB blocks",
     )
     parser.add_argument(
@@ -697,6 +699,7 @@ def parse_gapt_args(parser):
     add_bool_arg(parser, "n-conditioning", "condition generator on num. particles", default=False)
     add_bool_arg(parser, "n-normalized", "use normalized num. particles", default=False)
     add_bool_arg(parser, "no-D-conditioning", "do not condition discriminator on num. particles", default=False)
+    add_bool_arg(parser, "learn-anchor-from-global-noise", "learn the ISAB anchors from global noise", default=False)
     add_bool_arg(parser, "gapt-mask", "use mask in GAPT", default=True)
     add_bool_arg(parser, "use-isab", "use ISAB in GAPT", default=False)
     add_bool_arg(parser, "use-ise", "use ISE in GAPT discriminator", default=False)
@@ -977,6 +980,8 @@ def process_optimization_args(args):
 
 
 def process_regularization_args(args):
+    if args.batch_norm:
+        args.batch_norm_disc, args.batch_norm_gen = True, True
     if args.spectral_norm:
         args.spectral_norm_disc, args.spectral_norm_gen = True, True
     if args.layer_norm:
@@ -1441,6 +1446,7 @@ def setup_gapt(args, gen):
         "num_particles": args.num_hits,
         "num_heads": args.num_heads,
         "embed_dim": args.gapt_embed_dim,
+        "learn_anchor_from_global_noise": args.learn_anchor_from_global_noise,
         "sab_fc_layers": args.sab_fc_layers,
         "use_custom_mab": args.use_custom_mab,
         "use_mask": args.gapt_mask,
@@ -1654,6 +1660,7 @@ def get_model_args(args):
                 "global_noise_dim": args.global_noise_input_dim
             }
         model_args["embed_dim"] = args.gapt_embed_dim
+        model_args["init_noise_dim"] = args.init_noise_dim
     elif args.model == "linear_gan":
         model_args["input_size"] = args.input_size
         model_args["d_hidden"] = args.d_hidden
@@ -1673,6 +1680,8 @@ def get_model_args(args):
 
     return model_train_args, model_eval_args, extra_args
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def optimizers(args, G, D):
     if args.spectral_norm_gen:
@@ -1725,12 +1734,15 @@ def losses(args):
         keys.append("gp")
 
     # eval_keys = ["w1p", "w1m", "w1efp", "fpnd", "fpd", "coverage", "mmd"]
-    eval_keys = ["w1p", "w1m", "w1efp", "fpnd", "fpd"]
+    eval_keys = ["w1p", "w1m", "w1efp", "fpnd", "fpd", "kpd"]
     # metrics which store more than a single value per epoch e.g. mean and std
-    multi_value_keys = ["w1p", "w1m", "w1efp"]
+    multi_value_keys = ["w1p", "w1m", "w1efp", "fpd", "kpd"]
 
     if not args.fpnd:
         eval_keys.remove("fpnd")
+
+    if not args.kpd:
+        eval_keys.remove("kpd")
 
     if not args.fpd:
         eval_keys.remove("fpd")

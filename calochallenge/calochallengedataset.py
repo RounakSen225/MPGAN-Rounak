@@ -35,6 +35,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         use_mask: bool = True,
         train: bool = False,
         ignore_layer_12: bool = True,
+        filter_all_zero_energies: bool  = True,
         train_single_feature: int = -1
     ):
         self.data_dir = data_dir
@@ -55,11 +56,13 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.train = train
         self.ignore_layer_12 = ignore_layer_12
         self.train_single_layer = train_single_layer
+        self.filter_all_zero_energies = filter_all_zero_energies
         self.train_single_feature = train_single_feature
-        self._num_non_mask_features = 4 if self.train_single_feature == -1 else 1
+        self._num_non_mask_features = 4
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.set_particle_features()
-        dataset = self.format_data()
+        dataset = self.format_data().to(self.device)
 
         if self.use_mask:
             dataset = self.apply_mask(dataset)
@@ -70,23 +73,23 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if self.logR:
             dataset[:, :, 2] = self.apply_log(dataset, 2)
 
+        if self.normalize:
+            self.normalize_features(dataset, feature_shifts=-0.5)
+
         if len(self.inc) != 0:
             dataset = self.filter_by_incident_energies(dataset)
 
         if self.num_particles != -1:
             dataset = self.get_top_n_energies(dataset)
 
+        jet_features = self.get_jet_features(dataset)
+        
         if self.train_single_layer != -1:
             dataset = self.filter_single_layer(dataset)
 
-        if self.num_particles != -1:
-            dataset = self.get_top_n_energies(dataset)
+        if self.filter_all_zero_energies:
+            dataset = self.filter_zero_energies(dataset)
 
-        jet_features = self.get_jet_features(dataset)
-
-        if self.normalize:
-            self.normalize_features(dataset, feature_shifts=-0.5)
-        
         if self.train_single_feature != -1:
             dataset = self.get_single_feature(dataset)
 
@@ -112,7 +115,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
     def apply_mask(self, dataset: Tensor) -> Tensor:
         mask = (dataset.numpy()[:, :, 3:] != 0).astype(float)
-        masked_dataset = torch.from_numpy(np.concatenate((dataset, mask), axis=2))
+        masked_dataset = torch.Tensor(np.concatenate((dataset, mask), axis=2))
         return masked_dataset
     
     def apply_log(self, dataset: Tensor, index: int) -> Tensor:
@@ -125,8 +128,19 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         energies = data_inc_sorted[self.inc]
         data_inc = data_inc.flatten()
         indices = [np.where(data_inc == element)[0] for element in energies]
-        dataset = torch.from_numpy(np.concatenate([dataset[idx] for idx in indices]))
+        dataset = torch.Tensor(np.concatenate([dataset[idx] for idx in indices]))
         return dataset
+    
+    def filter_zero_energies(self, dataset: Tensor) -> Tensor:
+        mask = torch.any(dataset[:, :, -1] == (1 + self.feature_shifts[-1]), dim=1)
+        dataset = dataset[mask]
+        return dataset
+
+    def _unnormalize_mask(self, data: Tensor) -> Tensor:
+        return (data - self.feature_shifts[-1])/self.feature_norms[-1] * self.feature_maxes[-1] + self.feature_mins[-1]
+
+    def _normalize_z(self, data: int) -> float:
+        return (data - self.feature_mins[0])/self.feature_maxes[0] * self.feature_norms[0] + self.feature_shifts[0]
 
     def format_data(self) -> Tensor:
         """
@@ -148,7 +162,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         coordinates = np.tile(coordinates, (Ne, 1, 1))
         data_tile = np.tile(data.T, (1, 1, 1))
         point_cloud = np.vstack((coordinates.T, data_tile)).T
-        return torch.from_numpy(point_cloud)
+        return torch.Tensor(point_cloud)
+    
+
     
     def filter_single_layer(self, dataset: Tensor) -> Tensor:
         """
@@ -157,8 +173,8 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if not self.normalize or not self.ignore_layer_12:
             raise RuntimeError("Can't filter data if dataset has not been normalized or layer 12 is not ignored!")
         
-        filter_layer = self.train_single_layer
-
+        filter_layer = self._normalize_z(self.train_single_layer)
+        
         print('Filter layer: ', filter_layer)
 
         Ne, _, Nf = dataset.shape
@@ -168,14 +184,14 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         num_rows = temp_array.shape[0]
         if num_rows < Ne * t:
             padding_rows = Ne * t - num_rows
-            zero_padding = np.zeros((padding_rows, Nf))
+            zero_padding = np.ones((padding_rows, Nf)) * self.feature_shifts[0]
             zero_padding[:, 0] = filter_layer
             temp_array = np.vstack((temp_array, zero_padding))
         else:
             temp_array = temp_array[:Ne * t]
 
         temp_array = temp_array.reshape(-1, t, Nf)
-        return torch.from_numpy(temp_array)
+        return torch.Tensor(temp_array)
 
 
     def get_jet_features(self, dataset: Tensor) -> Tensor:
@@ -192,7 +208,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             Tensor: jet features tensor of shape [N, num_jet_features].
 
         """
-        jet_num_particles = (torch.sum(dataset[:, :, -1], dim=1) / self.num_particles).unsqueeze(1)
+        jet_num_particles = (torch.sum(self._unnormalize_mask(dataset[:, :, -1]), dim=1) / self.num_particles).unsqueeze(1)
         logging.debug("{num_particles = }")
         return jet_num_particles
     
@@ -200,9 +216,10 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         f = self.train_single_feature
         fn = dataset.shape[2]
         if self.use_mask:
-            if f != 3:
-                raise RuntimeError("Cannot consider mask feature if energy feature is not present")
-            data = torch.from_numpy(dataset.numpy()[:, :, np.r_[f:f+1, fn-1:fn]])
+            if f != 0:
+                data = torch.Tensor(dataset.numpy()[:, :, np.r_[0:1, f:f+1, fn-1:fn]])
+            else:
+                data = torch.Tensor(dataset.numpy()[:, :, np.r_[0:1, fn-1:fn]])
         else:
             data = dataset[:, :, f:f+1]
         return data
@@ -285,6 +302,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         print('Min features: ', feature_mins)
 
         return feature_maxes
+    
 
     #@classmethod
     def unnormalize_features(
@@ -328,9 +346,16 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             if self.train_single_feature == -1:
                 features = range(num_features)
             else:
-                features = [0] if not self.use_mask else [0, -1]
+                features = [self.train_single_feature] + ([0] if not self.use_mask else [0, -1])
 
-            for i in features:
+            for i in range(self._num_non_mask_features + 1):
+                if i not in features and i != self._num_non_mask_features:
+                    np.delete(self.feature_maxes, i)
+                    np.delete(self.feature_mins, i)
+                    np.delete(self.feature_norms, i)
+                    np.delete(self.feature_shifts, i)
+
+            for i in range(num_features):
                 if self.feature_shifts[i] is not None:
                     dataset[:, :, i] -= self.feature_shifts[i]
 
@@ -345,22 +370,26 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         if not is_real_data and zero_mask_particles and self.use_mask:
             dataset[~mask] = 0
 
-        if self.train_single_feature != -1: 
-            return (dataset[:, :, :self._num_non_mask_features], mask) if ret_mask_separate else (dataset[:, :, :self._num_non_mask_features], None)
-
         if not is_real_data and zero_neg_pt:
-            dataset[:, :, 2][dataset[:, :, 2] < 0] = 0
+            if self.train_single_feature == -1:
+                dataset[:, :, 2][dataset[:, :, 2] < 0] = 0
+            elif self.train_single_feature == 2:
+                dataset[:, :, 1][dataset[:, :, 1] < 0] = 0
             dataset[:, :, 0][dataset[:, :, 0] < 0] = 0
 
         if self.logE:
-            dataset[:, :, 3] = torch.exp(dataset[:, :, 3]) - feature_cutoff[3]
+            if self.train_single_feature == -1:
+                dataset[:, :, 3] = torch.exp(dataset[:, :, 3]) - feature_cutoff[3]
+            elif self.train_single_feature == 3:
+                dataset[:, :, 1] = torch.exp(dataset[:, :, 1]) - feature_cutoff[3]
 
         if self.logR:
-            dataset[:, :, 2] = torch.exp(dataset[:, :, 2]) - feature_cutoff[2]
+            if self.train_single_feature == -1:
+                dataset[:, :, 2] = torch.exp(dataset[:, :, 2]) - feature_cutoff[2]
+            elif self.train_single_feature == 2:
+                dataset[:, :, 1] = torch.exp(dataset[:, :, 1]) - feature_cutoff[2]
 
-        #dataset[:, :, -1] += 0.5
-
-        return (dataset[:, :, :self._num_non_mask_features], mask) if ret_mask_separate else (dataset[:, :, :self._num_non_mask_features], None)
+        return (dataset[:, :, :-1], mask) if ret_mask_separate else (dataset[:, :, :-1], None)
     
     def get_boundaries(self):
         filename = self.data_dir + 'binning_dataset_1_' + self.particle + 's.xml'
@@ -378,16 +407,19 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
                 alpha = int(layer.attrib.get('n_bin_alpha'))
                 if len(r) > 1:
                     l_list.append(layer_count)
-                    if self.logR: r_list_log.append(torch.log(torch.Tensor(sorted(r)) + feature_cutoff[2]))
-                    r_list.append(torch.Tensor(sorted(r)) + feature_cutoff[2])
+                    if self.logR: r_list_log.append(torch.log(torch.tensor(r[1:-1], device=self.device) + feature_cutoff[2]))
+                    r_list.append(torch.tensor(r[1:-1], device=self.device))
                     alphas = np.linspace(-1.0*math.pi, math.pi, alpha+1)
-                    alpha_list.append(torch.from_numpy(alphas))
+                    alpha_list.append(torch.Tensor(alphas[1:-1]))
                 if len(r) > 1 or not self.ignore_layer_12: layer_count += 1
-        l_list = torch.Tensor([(l_list[i] + l_list[i+1])/2 for i in range(len(l_list)-1)])
+        l_list = torch.tensor(self.get_midpoint(l_list), device=self.device)
         self.boundaries = l_list, alpha_list, r_list
         if self.logR: r_list = r_list_log
         l_list, alpha_list, r_list = self._normalize_feature_boundaries(l_list=l_list, alpha_list=alpha_list, r_list=r_list)
-        return l_list, alpha_list, r_list
+        return l_list, alpha_list, r_list, r_list_log
+    
+    def get_midpoint(self, x):
+        return [(x[i]+x[i+1])/2 for i in range(len(x)-1)]
     
     def _normalize_feature_boundaries(self, 
         l_list, 
@@ -407,9 +439,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
             data_shifted = data - self.feature_mins[ind]
             if self.feature_maxes[ind] != 0:
                 data_norm = data_shifted / self.feature_maxes[ind] * self.feature_norms[ind] + self.feature_shifts[ind]
-                data_norm[data_norm < -0.5] = -0.5
-                data_norm[data_norm > 0.5] = 0.5
-                return data_norm
+                return torch.clamp(data_norm, max = 1 + self.feature_shifts[0], min = self.feature_shifts[0])
             else:
                 return data_shifted
         return data

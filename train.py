@@ -39,7 +39,6 @@ r_idx = 2
 alpha_idx = 1
 z_idx = 0
 e_idx = 3
-shift = -0.5
 offset = 0.5
 num_layers = 5
 normalize = True
@@ -48,8 +47,9 @@ logR = True
 train_single_layer = -1
 train_single_feature = -1
 ste_enable = True
-eps = 1e-1
+eps = 0.125
 threshold = 1e-10
+device = None
 # edges for binning z values
 # eta and phi are also mapped from layer_specs with pattern, can be represented by range
 # eta and phi boundaries should be 2 dimentional, depends on z value
@@ -63,8 +63,9 @@ feature_stats = None
 
 
 def main():
+    global device
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.autograd.set_detect_anomaly(True)
+    torch.autograd.set_detect_anomaly(False)
 
     args = setup_training.init()
     torch.manual_seed(args.seed)
@@ -118,15 +119,16 @@ def main():
     global z_boundaries
     global boundaries_abs
     global r_boundaries
+    global r_boundaries_log
     global alpha_boundaries
     global all_feature_edges
 
     global feature_stats
     feature_stats = X_train.get_feature_stats()
 
-    z_boundaries, alpha_boundaries, r_boundaries = X_train.get_boundaries()
+    z_boundaries, alpha_boundaries, r_boundaries, r_boundaries_log = X_train.get_boundaries()
     if args.model == 'linear_gan':
-        z_boundaries = torch.Tensor([0.0, 0.25, 0.5, 0.75, 1.0]) + feature_stats[-1][0]
+        z_boundaries = torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0]).to(dtype=torch.float32) + feature_stats[-1][0]
     all_feature_edges =  z_boundaries, alpha_boundaries, r_boundaries
     linear_gan_args = {'num_features': X_train.data.shape[2], 'boundaries': all_feature_edges}
     G, D = setup_training.models(args=args, **linear_gan_args)
@@ -178,24 +180,32 @@ def normalize_input(
         idx: int,
         layer: int = -1,
         ):
-        if not normalize: return bins
         boundaries = z_boundaries, alpha_boundaries, r_boundaries
-        if idx == 2 and logR: boundary_layer = boundaries_abs[idx][layer]
-        else: boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
+        if not normalize: 
+            boundary_layer = boundaries_abs[idx][layer]
+        else: 
+            boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
 
-        def normalize_bins(bin):
-            bin = round(bin)
+        def assign_bin_to_boundary(bin):
+            if boundary_layer.nelement() == 0:
+                return 0
             i = bin
-            if bin == 0: i = bin + 1
-            elif bin == len(boundary_layer): i = bin - 1
+            if bin == 0:
+                return feature_stats[3][0]
+            elif bin == len(boundary_layer):
+                return 1 + feature_stats[3][0]
             return (boundary_layer[i] + boundary_layer[i-1])/2
         
-        if idx:
-            values = torch.Tensor(np.vectorize(normalize_bins)(bins.detach().cpu().numpy())) if bins.nelement() != 0 else bins
-            if idx == 2:
-                if logR: values = torch.log(values + threshold)
-                values = normalize_values(data=values, ind=idx)
-        else: values = normalize_values(data=bins, ind=idx)
+        values = torch.tensor(
+            np.vectorize(assign_bin_to_boundary)
+            (bins.detach().cpu().numpy())).to(dtype=torch.float32
+                            ) if bins.nelement() != 0 else bins
+        
+        if idx == 2 and logR:
+            un_normalized_values = unnormalize_values_r(values)
+            values = normalize_values(
+                data=torch.log(un_normalized_values + threshold), ind=idx
+                )
 
         return values
 
@@ -209,11 +219,23 @@ def normalize_values(
             data_shifted = data - feature_mins[ind]
             if feature_maxes[ind] != 0:
                 data_norm = data_shifted / feature_maxes[ind] * feature_norms[ind] + feature_shifts[ind]
-                return torch.clamp(data_norm, min=-0.5, max=0.5)
+                return torch.clamp(data_norm, max = 1 + feature_shifts[0], min = feature_shifts[0])
             else:
                 return data_shifted
         return data
+
+
+def unnormalize_values_r(
+        data: Tensor,
+        ):
+        index = 2
+        r_boundary_values = boundaries_abs[2]
+        minR = (r_boundary_values[1][0] + r_boundary_values[1][1])/2
+        maxR = (r_boundary_values[4][-1] + r_boundary_values[4][-2])/2
+        return (data - feature_stats[3][index])/feature_stats[2][index] * maxR + minR
        
+
+
 
 def get_gen_noise(
     model_args,
@@ -246,7 +268,7 @@ def get_gen_noise(
                 )
             )
     elif model == "gapt":
-        noise = dist.sample((num_samples, num_particles, model_args["embed_dim"]))
+        noise = dist.sample((num_samples, num_particles, model_args["init_noise_dim"]))
     elif model == "rgan" or model == "graphcnngan":
         noise = dist.sample((num_samples, model_args["latent_dim"]))
     elif model == "treegan":
@@ -266,79 +288,88 @@ class BucketizeFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         # set values to bin centers, taking care of normalisation
-        z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
+        z_bins = torch.bucketize(
+            input[:, :, z_idx], z_boundaries.to(input.device)
+            )
         input[:, :, z_idx] = normalize_input(bins=z_bins, idx=z_idx)
-        
-        # lambda function to map eta and phi to different z
         for i in range(num_layers):
-            # need to check whether z_b corresponds to current z values
             if train_single_feature == 0: break
-
             filter = z_bins == i
-
             filter_layer = input[filter]
-           
-            alpha_bins = torch.bucketize(
-                filter_layer[:, alpha_idx], alpha_boundaries[i].to(input.device)
-            )
-            filter_layer[:, alpha_idx] = normalize_input(bins=alpha_bins, idx=alpha_idx, layer=i)
-
-            r_bins = torch.bucketize(
-                filter_layer[:, r_idx], r_boundaries[i].to(input.device)
-            )
-            filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
-
+            if train_single_feature == -1 or train_single_feature == 1:
+                alpha_bins = torch.bucketize(
+                    filter_layer[:, alpha_idx], alpha_boundaries[i].to(input.device)
+                )
+                filter_layer[:, alpha_idx] = normalize_input(bins=alpha_bins, idx=alpha_idx, layer=i)
+            if train_single_feature == -1 or train_single_feature == 2:
+                r_bins = torch.bucketize(
+                    filter_layer[:, r_idx], r_boundaries_log[i].to(input.device)
+                )
+                filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
             input[filter] = filter_layer
 
-        #input[:, :, e_idx] = normalize_values(data=input[:, :, e_idx])
-
-        input = torch.round(input, decimals=4)  
+        #input = torch.round(input, decimals=4)
         return input
 
     @staticmethod
     def backward(ctx, grad_output):
         return torch.nn.functional.hardtanh(grad_output)
     
-# Maybe not necessary? Can use the forward directly in Bucketize?
-class GumbelSoftmaxSTE(torch.autograd.Function):
+class GumbelSoftmax(torch.autograd.Function):
 
-    def _gumbel_softmax(x: Tensor, boundaries: Tensor, idx: int, r: float = 1e-3, layer: int = -1, tau:float = 1.0) -> Tensor:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        bin_indices = None
-        if idx == 2 and logR: 
-            bin_indices = boundaries_abs[idx][layer]
-        elif idx: 
-            bin_indices = boundaries[idx][layer]
-        else: 
-            bin_indices = boundaries[idx]
-        bin_indices = bin_indices.to(device)
-        x = x.to(device)
+    def _gumbel_softmax(ctx, x: Tensor, boundaries: Tensor, idx: int, layer: int = -1, tau:float = 1.0, hard:bool = False) -> Tensor:
+        bin_indices = GumbelSoftmax._get_midpoint(boundaries[idx][layer].to(x.device)) if idx else GumbelSoftmax._get_midpoint(boundaries[idx].to(x.device))
         diffs = x.unsqueeze(-1) - bin_indices.unsqueeze(0)
-        diffs_abs = torch.abs(diffs).to(device)
-        gumbel_noise = -torch.log(-torch.log(torch.rand_like(diffs_abs) + threshold) + threshold).to(device)
-        gumbel_softmax_probs = F.softmax(((-diffs_abs + r * gumbel_noise) / tau), dim=-1).to(device)
-        bin_indices_new = torch.arange(len(bin_indices)).to(device)
-        feature_soft_binned = torch.sum(gumbel_softmax_probs * bin_indices_new, dim=-1)
-        feature_soft_binned_new = normalize_input(bins=feature_soft_binned, idx=idx, layer=layer)
-        return feature_soft_binned_new
+        logits = F.softmax(diffs, dim=-1)
+        gumbel_noise = -torch.log(-torch.log(torch.rand_like(logits) + threshold) + threshold)
+        gumbel_softmax_probs = F.softmax(((logits + gumbel_noise) / tau), dim=-1) 
+        #gumbel_softmax_probs = torch.nn.functional.gumbel_softmax(logits, tau=0.001, hard=hard, dim=-1)
+        if hard:
+            gumbel_softmax_probs_hard = torch.max(gumbel_softmax_probs, dim=-1, keepdim=True)[1]
+            gumbel_softmax_probs_hard = torch.eye(logits.size(-1), device=logits.device)[gumbel_softmax_probs_hard.squeeze(-1)]
+            gumbel_softmax_probs = gumbel_softmax_probs_hard - gumbel_softmax_probs.detach() + gumbel_softmax_probs
+        feature_binned = torch.sum(gumbel_softmax_probs * bin_indices, dim=-1).to(x.device)
+        ctx.save_for_backward(gumbel_softmax_probs)
+        ctx.hard = hard
+        return feature_binned
+    
+    #z -> Linear-layer (probs) -> nn.gumbel_softmax() -> discrete z
+
+    def _get_filter(x: Tensor, i: int):
+        return (x >= i-eps) & (x < i+eps)
+    
+    def _get_midpoint(x: Tensor):
+        return (x[1:] + x[:-1])/2
         
     @staticmethod
     def forward(ctx, input):
-        input[:, :, z_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=input[:, :, z_idx], boundaries=all_feature_edges, idx=0, tau=1e-3)
-        
+        input[:, :, z_idx] = GumbelSoftmax._gumbel_softmax(
+            ctx, x=input[:, :, z_idx], boundaries=all_feature_edges, idx=0, tau=1, hard=False
+            )
         for i in range(num_layers):
             if train_single_feature == 0: break
-            filter = abs(input[:, :, z_idx] - i) < eps
+            filter = GumbelSoftmax._get_filter(input[:, :, z_idx], i)
             filter_layer = input[filter]
-            filter_layer[:, alpha_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=filter_layer[:, alpha_idx], boundaries=all_feature_edges, idx = 1, layer=i, tau=1e-3)
-            filter_layer[:, r_idx] = GumbelSoftmaxSTE._gumbel_softmax(x=filter_layer[:, r_idx], boundaries=all_feature_edges, idx = 2, layer=i, tau=1e-3)
+            filter_layer[:, alpha_idx] = GumbelSoftmax._gumbel_softmax(
+                ctx, x=filter_layer[:, alpha_idx], boundaries=all_feature_edges, idx = 1, layer=i, tau=1, hard=False
+                )
+            filter_layer[:, r_idx] = GumbelSoftmax._gumbel_softmax(
+                ctx, x=filter_layer[:, r_idx], boundaries=all_feature_edges, idx = 2, layer=i, tau=1, hard=False
+                )
             input[filter] = filter_layer
 
         return input
 
     @staticmethod
     def backward(ctx, grad_output):
-        return torch.nn.functional.hardtanh(grad_output)
+        y_soft, = ctx.saved_tensors
+        hard = ctx.hard
+        grad_logits = grad_output.clone()
+        if hard:
+            return grad_logits, None, None
+        else:
+            return grad_logits * y_soft * (1 - y_soft), None, None
+    
     
 
 class StraightThroughEstimator(torch.nn.Module):
@@ -348,11 +379,30 @@ class StraightThroughEstimator(torch.nn.Module):
         super(StraightThroughEstimator, self).__init__()
 
     def forward(self, x):
-        if self.method == 'B':
-            x = BucketizeFunction.apply(x)
-        elif self.method == 'G':
-            x = GumbelSoftmaxSTE.apply(x)
-        return x
+        return BucketizeFunction.apply(x)
+    
+def predict(input: Tensor):
+        z_bins = torch.bucketize(
+            input[:, :, z_idx], z_boundaries.to(input.device)
+            )
+        input[:, :, z_idx] = normalize_input(bins=z_bins, idx=z_idx)
+        for i in range(num_layers):
+            if train_single_feature == 0: break
+            filter = z_bins == i
+            filter_layer = input[filter]
+            alpha_bins = torch.bucketize(
+                filter_layer[:, alpha_idx], alpha_boundaries[i].to(input.device)
+            )
+            filter_layer[:, alpha_idx] = normalize_input(bins=alpha_bins, idx=alpha_idx, layer=i)
+            r_bins = torch.bucketize(
+                filter_layer[:, r_idx], r_boundaries[i].to(input.device)
+            )
+            filter_layer[:, r_idx] = normalize_input(bins=r_bins, idx=r_idx, layer=i)
+            input[filter] = filter_layer
+
+        input = torch.round(input, decimals=4)  
+        return input
+    
 
 def gen(
     model_args: dict,
@@ -412,9 +462,12 @@ def gen(
         labels = labels.to(device)
 
     if noise is None:
-        noise, point_noise = get_gen_noise(
-            model_args, num_samples, num_particles, model, device, noise_std
-        )
+        if G.learnable_init_noise:
+            noise = G.sample_init_set(num_samples).to(device)
+        else:
+            noise, point_noise = get_gen_noise(
+                model_args, num_samples, num_particles, model, device, noise_std
+            )
 
     if model == 'gapt':
         global_noise = torch.randn(num_samples, model_args['global_noise_dim']).to(device) if G.noise_conditioning else None
@@ -476,7 +529,7 @@ def gen_multi_batch(
         print("labels.shape[0]", labels.shape[0])
         print("num_samples", num_samples)
         assert labels.shape[0] == num_samples, "number of labels doesn't match num_samples"
-        labels = Tensor(labels.float())
+        labels = Tensor(labels)
 
     gen_data = None
 
