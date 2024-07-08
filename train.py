@@ -197,9 +197,9 @@ def normalize_input(
             return (boundary_layer[i] + boundary_layer[i-1])/2
         
         values = torch.tensor(
-            np.vectorize(assign_bin_to_boundary)
-            (bins.detach().cpu().numpy())).to(dtype=torch.float32
-                            ) if bins.nelement() != 0 else bins.detach().cpu().numpy()
+            np.vectorize(assign_bin_to_boundary)(bins.cpu().numpy()), 
+            device=device
+            ) if bins.nelement() != 0 else bins
         
         if idx == 2 and logR:
             un_normalized_values = unnormalize_values_r(values)
