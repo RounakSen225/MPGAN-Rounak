@@ -114,7 +114,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         self.HLF_1_photons.CalculateFeatures(self.photon_file["showers"][:])
 
     def apply_mask(self, dataset: Tensor) -> Tensor:
-        mask = (dataset.numpy()[:, :, 3:] != 0).astype(float)
+        mask = (dataset.cpu().numpy()[:, :, 3:] != 0).astype(float)
         masked_dataset = torch.Tensor(np.concatenate((dataset, mask), axis=2))
         return masked_dataset
     
