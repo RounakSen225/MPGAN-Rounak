@@ -115,7 +115,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
 
     def apply_mask(self, dataset: Tensor) -> Tensor:
         mask = (dataset.cpu().numpy()[:, :, 3:] != 0).astype(float)
-        masked_dataset = torch.Tensor(np.concatenate((dataset, mask), axis=2))
+        masked_dataset = torch.Tensor(np.concatenate((dataset.cpu().numpy(), mask), axis=2))
         return masked_dataset
     
     def apply_log(self, dataset: Tensor, index: int) -> Tensor:
