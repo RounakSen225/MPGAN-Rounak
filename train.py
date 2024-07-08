@@ -199,7 +199,7 @@ def normalize_input(
         values = torch.tensor(
             np.vectorize(assign_bin_to_boundary)
             (bins.detach().cpu().numpy())).to(dtype=torch.float32
-                            ) if bins.nelement() != 0 else bins
+                            ) if bins.nelement() != 0 else bins.detach().cpu().numpy()
         
         if idx == 2 and logR:
             un_normalized_values = unnormalize_values_r(values)

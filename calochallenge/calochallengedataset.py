@@ -101,7 +101,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         logging.info("Dataset processed")
 
     def get_top_n_energies(self, dataset: Tensor) -> Tensor:
-        top_energy_dataset = torch.Tensor(np.array(list(map(lambda x: x[x[:, 3].argsort()][-self.num_particles:], dataset.numpy()))))
+        top_energy_dataset = torch.Tensor(np.array(list(map(lambda x: x[x[:, 3].argsort()][-self.num_particles:], dataset.cpu().numpy()))))
         return top_energy_dataset
 
     def set_particle_features(self):
@@ -180,7 +180,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         Ne, _, Nf = dataset.shape
         mask = (dataset[:, :, 0] == filter_layer)
         t = self.num_particles
-        temp_array = dataset[mask].numpy()
+        temp_array = dataset[mask].cpu().numpy()
         num_rows = temp_array.shape[0]
         if num_rows < Ne * t:
             padding_rows = Ne * t - num_rows
@@ -217,9 +217,9 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
         fn = dataset.shape[2]
         if self.use_mask:
             if f != 0:
-                data = torch.Tensor(dataset.numpy()[:, :, np.r_[0:1, f:f+1, fn-1:fn]])
+                data = torch.Tensor(dataset.cpu().numpy()[:, :, np.r_[0:1, f:f+1, fn-1:fn]])
             else:
-                data = torch.Tensor(dataset.numpy()[:, :, np.r_[0:1, fn-1:fn]])
+                data = torch.Tensor(dataset.cpu().numpy()[:, :, np.r_[0:1, fn-1:fn]])
         else:
             data = dataset[:, :, f:f+1]
         return data
@@ -410,7 +410,7 @@ class CaloChallengeDataset(torch.utils.data.Dataset):
                     if self.logR: r_list_log.append(torch.log(torch.tensor(r[1:-1], device=self.device) + feature_cutoff[2]))
                     r_list.append(torch.tensor(r[1:-1], device=self.device))
                     alphas = np.linspace(-1.0*math.pi, math.pi, alpha+1)
-                    alpha_list.append(torch.Tensor(alphas[1:-1]))
+                    alpha_list.append(torch.tensor(alphas[1:-1], device=self.device))
                 if len(r) > 1 or not self.ignore_layer_12: layer_count += 1
         l_list = torch.tensor(self.get_midpoint(l_list), device=self.device)
         self.boundaries = l_list, alpha_list, r_list
