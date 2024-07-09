@@ -182,12 +182,12 @@ def normalize_input(
         ):
         boundaries = z_boundaries, alpha_boundaries, r_boundaries
         if not normalize: 
-            boundary_layer = boundaries_abs[idx][layer]
+            boundary_layer = boundaries_abs[idx][layer].cpu().numpy()
         else: 
-            boundary_layer = boundaries[idx][layer] if idx != 0 else boundaries[idx]
+            boundary_layer = boundaries[idx][layer].cpu().numpy() if idx != 0 else boundaries[idx].cpu().numpy()
 
         def assign_bin_to_boundary(bin):
-            if boundary_layer.nelement() == 0:
+            if boundary_layer.size == 0:
                 return 0
             i = bin
             if bin == 0:
